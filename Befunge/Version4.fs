@@ -1,7 +1,7 @@
 ﻿// Learn more about F# at http://fsharp.org
 // See the 'F# Tutorial' project for more help.
 
-module V4 =
+module V4
 
     open System
     open System.IO
@@ -268,11 +268,11 @@ module V4 =
         let ctor = typeof<BefungeBase>.GetConstructor([| typeof<TextReader>; typeof<TextWriter>; typeof<string>; typeof<uint64> |])
         let count = m "GetCount"
 
-    let buildType (progText : string) (chains : Map<FollowState, Instruction list * LastInstruction>) : Type =
+    let buildType (fileName : string option) (progText : string) (chains : Map<FollowState, Instruction list * LastInstruction>) : Type =
 
         let assemblyName = AssemblyName("BefungeAssembly")
         let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
-        let dynMod = dynAsm.DefineDynamicModule("BefungeModule", "output.dll")
+        let dynMod = dynAsm.DefineDynamicModule("BefungeModule", Option.defaultValue "temp.dll" fileName)
         let typeAttributes = 
             TypeAttributes.Public |||
             TypeAttributes.Class |||
@@ -285,13 +285,13 @@ module V4 =
 
         let definedMethods =
             let defineMethod fs chain = 
-                printfn "Defining %s" (nameFromState fs)
+                // printfn "Defining %s" (nameFromState fs)
                 let method = tb.DefineMethod(nameFromState fs, MethodAttributes.Private) in
                 (method, chain) in
             chains |> Map.map defineMethod
 
         let buildMethod fs (method : MethodBuilder, (instructions, lastInstruction)) =
-            printfn "Emitting method: %s" (nameFromState fs)
+            // printfn "Emitting method: %s" (nameFromState fs)
             let il = method.GetILGenerator()
 
             let callBase (mi : MethodInfo) =
@@ -397,6 +397,9 @@ module V4 =
         defineConstructor()
 
         let result = tb.CreateType()
+
+        Option.iter dynAsm.Save fileName
+
         result
 
     // applies f to x until x doesn't change any more
@@ -415,20 +418,20 @@ module V4 =
 
         let inlineChains (m : Map<FollowState, Instruction list * LastInstruction>) =
 
-            printfn "Inlining %A" m
-            
             let inc k m =
                 match Map.tryFind k m with
                 | None -> Map.add k 1 m
                 | Some c -> Map.add k (c+1) m
 
-            let counts =
-                m |> Map.fold (fun cs _ (_, li) -> 
-                    match li with
-                    | Exit -> cs
-                    | Branch (l, r) -> inc l (inc r cs)
-                    | Rand (a, b, c, d) -> inc a (inc b (inc c (inc d cs)))
-                    | ToState n -> inc n cs) Map.empty
+            let countReferences m =
+                    m |> Map.fold (fun cs _ (_, li) -> 
+                        match li with
+                        | Exit -> cs
+                        | Branch (l, r) -> inc l (inc r cs)
+                        | Rand (a, b, c, d) -> inc a (inc b (inc c (inc d cs)))
+                        | ToState n -> inc n cs) Map.empty
+             
+            let counts = countReferences m
 
             let canBeInlined fs =
                 fs <> programEntryState // can't inline entry state!
@@ -436,44 +439,37 @@ module V4 =
             
             let isJump fs =
                 match m.[fs] with
-                | ([], ToState t) -> Some t
-                | _ -> None
+                | ([], ToState t) -> true
+                | _ -> false
+            
+            let target fs = 
+                match m.[fs] with
+                | ([], ToState t) -> t
 
             let result =
                 m
                 |> Map.map (fun fs ((il, li) as value) ->
                     match li with
-                    //| ToState n when canBeInlined n ->
-                    //    printfn "Inlining %A into %A" n fs
-                    //    let il', li' = m.[n] in
-                    //    (List.append il il', li')
-                    //| Branch (l, r) when canBeInlined l ->
-                    //    match isJump l with
-                    //    | Some l -> (il, Branch (ord2 (l, r)))
-                    //    | None -> value
-                    //| Branch (l, r) when canBeInlined r ->
-                    //    match isJump r with
-                    //    | Some r -> (il, Branch (ord2 (l, r)))
-                    //    | None -> value
-                    //| Rand (a, b, c, d) when canBeInlined a ->
-                    //    match isJump a with
-                    //    | Some a -> (il, Rand (ord4 (a, b, c, d)))
-                    //    | None -> value
-                    //| Rand (a, b, c, d) when canBeInlined b ->
-                    //    match isJump b with
-                    //    | Some b -> (il, Rand (ord4 (a, b, c, d)))
-                    //    | None -> value
-                    //| Rand (a, b, c, d) when canBeInlined c ->
-                    //    match isJump c with
-                    //    | Some c -> (il, Rand (ord4 (a, b, c, d)))
-                    //    | None -> value
-                    //| Rand (a, b, c, d) when canBeInlined d ->
-                    //    match isJump d with
-                    //    | Some d -> (il, Rand (ord4 (a, b, c, d)))
-                    //    | None -> value
+                    | ToState n when canBeInlined n || isJump n ->
+                        // printfn "Inlining %A into %A" n fs
+                        let il', li' = m.[n] in
+                        (List.append il il', li')
+                    | Branch (l, r) when isJump l || isJump r ->
+                        let l = if isJump l then target l else l
+                        let r = if isJump r then target r else r
+                        (il, Branch (l, r))
+                    | Rand (a, b, c, d)
+                        when isJump a || isJump b || isJump c || isJump d ->
+                        let a = if isJump a then target a else a
+                        let b = if isJump b then target b else b
+                        let c = if isJump c then target c else c
+                        let d = if isJump d then target d else d
+                        (il, Rand (randSort (a, b, c, d)))
                     | _ ->  value)
 
-            result
+            let newCounts = countReferences result
+
+            result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState)
 
         let rec optimizeChain = function
             // constant folding
@@ -490,23 +486,30 @@ module V4 =
             | (i :: is) -> i :: optimizeChain is
             | [] -> []
 
-        let optimizeLast = function
+        let optimizeLast fs = function
             | Branch (l, r) when l = r -> ToState r
             | Rand (a, b, c, d) when a = b && b = c && c = d -> ToState d
+
+            // Two orders to check here - since Rand is always ordered,
+            // either fs < all or fs > all:
+            | Rand (a, b, c, d) when a = fs && b = c && c = d -> ToState d
+            | Rand (a, b, c, d) when a = fs && b = fs && c = d -> ToState d
+            | Rand (a, b, c, d) when a = fs && b = fs && c = fs -> ToState d
+
+            | Rand (a, b, c, d) when a = b && b = c && d = fs -> ToState a
+            | Rand (a, b, c, d) when a = b && c = fs && d = fs -> ToState a
+            | Rand (a, b, c, d) when b = fs && c = fs && d = fs -> ToState a
+
             | c -> c
 
-        let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast last))
+        let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast fs last))
 
         let collapseIdenticalChains (m : Map<FollowState, Instruction list * LastInstruction>) : Map<FollowState, Instruction list * LastInstruction> =
-
-            printfn "Collapsing: %A" m
             let states1 = m |> Map.toSeq |> Seq.map fst
-            printfn "States: %A" states1
 
             // invert the map, now all states with the same instruction list are in the same slot
             let inverted = invertMap m
             let states2 = inverted |> Map.toSeq |> Seq.map fst
-            printfn "States: %A" states2
 
             // pick one state to represent the others (the 'minimum')
             let newMappings : Map<FollowState, FollowState> =
@@ -514,9 +517,7 @@ module V4 =
                     let min = List.min fss in
                     List.fold (fun m fs -> Map.add fs min m) m fss) Map.empty inverted
 
-            printfn "New mappings: %A" newMappings
             let states2 = newMappings |> Map.toSeq |> Seq.map fst
-            printfn "States: %A" states2
 
             // rewrite all the last-instructions to remap their states
             inverted
@@ -531,138 +532,126 @@ module V4 =
                 (List.min fss, (is, newLast)))
             |> Map.ofSeq
 
-        fix (optimizeChains << collapseIdenticalChains << inlineChains) chains
+        fix (optimizeChains << inlineChains << collapseIdenticalChains) chains
     
     let toText (prog : Program) : string =
         let sb = StringBuilder(Array2D.length1 prog * Array2D.length2 prog)
         prog |> Array2D.iter (fun c -> sb.Append c |> ignore)
         sb.ToString()
 
-    let compile (prog : Program) input output : Type =
+    let compile (fileName : string option) (prog : Program) shouldOptimize : Type =
         computeChains prog 
-        |> optimize
-        |> buildType (toText prog)
-            
-    let run (prog : Program) seed input output =
+        |> (fun p -> if shouldOptimize then optimize p else p)
+        |> buildType fileName (toText prog)
 
-        let compiled = compile prog input output
-
-        let c =
-            Activator.CreateInstance(compiled, [| input; output; seed |])
+    let run prog (seed : uint64) (input : TextReader) (output : TextWriter) =
+        let compiled = compile None prog true
+        
+        let instance =
+            Activator.CreateInstance(compiled, input, output, seed)
             :?> BefungeBase
-
-        c.Run () // seed input output
-
-open V4
-            
-module Samples =
-
-    let p1 = 
-        ">              v\n" +
-        "v  ,,,,,\"Hello\"<\n" +
-        ">48*,          v\n" +
-        "v,,,,,,\"World!\"<\n" +
-        ">25*,@"
-
-    let p2 = 
-        " >25*\"!dlrow ,olleH\":v\n" +
-        "                  v:,_@\n" +
-        "                  >  ^\n"
-
-    let p3 = 
-        " v>>>>>v\n" +
-        "  12345\n" +
-        "  ^?^\n" +
-        " > ? ?^\n" +
-        "  v?v\n" +
-        "  6789\n" +
-        "  >>>> v\n" +
-        " ^    .<"
-
-module Tests = 
-    open Xunit
-    open System.IO
-    open ApprovalTests
-
-    let private verify code input output =
-        use inS = new StringReader(input)
-        use outS = new StringWriter()
-        let count = run (parse code) 0UL inS outS
-
-        Assert.Equal(output, outS.ToString()) 
-
-    let private verifyOptimized code input output expectedInsns =
-        use inS = new StringReader(input)
-        use outS = new StringWriter()
-        let count = run (parse code) 0UL inS outS
-
-        Assert.Equal(output, outS.ToString()) 
-        Assert.Equal(expectedInsns, count)
-
-    [<Theory>] 
-    [<InlineData("@", "", "", 0)>]
-    [<InlineData("99*76*+.@", "", "123 ", 2)>]
-    [<InlineData("&,@", "65 ", "A", 2)>]
-    [<InlineData("~.@", "A", "65 ", 2)>]
-    [<InlineData("665+*1-,@", "", "A", 2)>]
-    [<InlineData("665+*1-.@", "", "65 ", 2)>]
-    [<InlineData(">123...@", "", "3 2 1 ", 6)>]
-    [<InlineData(">123#...@", "", "3 2 ", 5)>]
-    [<InlineData("123.$.@", "", "3 1 ", 6)>]
-    [<InlineData("123\\...@", "", "2 3 1 ", 6)>]
-    [<InlineData("65`.@", "", "1 ", 2)>]
-    [<InlineData("25`.@", "", "0 ", 2)>]
-    let specExample code input output insns =
-        verifyOptimized code input output insns
-
-    [<Theory>]
-    [<InlineData("\"ver\",,,@", "", "rev")>]
-
-    [<InlineData("1!.@", "", "0 ")>]
-    [<InlineData("2!.@", "", "0 ")>]
-    [<InlineData("0!.@", "", "1 ")>]
-
-    [<InlineData("1..@", "", "1 0 ")>] // popping empty stack produces 0
-
-    [<InlineData("1:..@", "", "1 1 ")>] // dup works
-
-    [<InlineData("~:,,@", "A", "AA")>]
-
-    [<InlineData("<@,~", "A", "A")>]
-    let myTests code input output =
-        verify code input output
+        
+        instance.Run()
 
 
-    [<Theory>]
-    [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
-    [<InlineData("samples-factorial.bf", "2 ", "2 ")>]
-    [<InlineData("samples-factorial.bf", "3 ", "6 ")>]
-    [<InlineData("samples-factorial.bf", "5 ", "120 ")>]
-    // [<InlineData("samples-sieve.bf", "10 ", "2 ")>]
-    // uses 'p'
-    [<InlineData("samples-convert.bf", "", "234 ")>]
-    let sampleFiles file input output = 
-        verify (File.ReadAllText file) input output
+    module Samples =
 
-    [<Theory>]
-    [<InlineData("64+\"!dlroW ,olleH\">:#,_@", "", "Hello, World!\n")>]
-    [<InlineData("~:1+!#@_,", "this is cat", "this is cat")>]
-    let samplePrograms code input output = 
-        verify code input output
-    
-    [<Theory>]
-    [<InlineData("01->1# +# :# 0# g# ,# :# 5# 8# *# 4# +# -# _@")>]
-    // [<InlineData("0v\n<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
-    // [<InlineData(":0g,:\"~\"`#@_1+0\"Quines are Fun\">_")>]
-    let quines q = 
-        verify q "" q
+        let p1 = 
+            ">              v\n" +
+            "v  ,,,,,\"Hello\"<\n" +
+            ">48*,          v\n" +
+            "v,,,,,,\"World!\"<\n" +
+            ">25*,@"
 
-open System
-open System.IO
+        let p2 = 
+            " >25*\"!dlrow ,olleH\":v\n" +
+            "                  v:,_@\n" +
+            "                  >  ^\n"
 
-[<EntryPoint>]
-let main argv = 
+        let p3 = 
+            " v>>>>>v\n" +
+            "  12345\n" +
+            "  ^?^\n" +
+            " > ? ?^\n" +
+            "  v?v\n" +
+            "  6789\n" +
+            "  >>>> v\n" +
+            " ^    .<"
 
-    let prog = parse (File.ReadAllText "samples-bill.bf")
-    run prog 0UL Console.In Console.Out |> ignore
-    0
+    module Tests = 
+        open Xunit
+        open System.IO
+        open ApprovalTests
+
+        let private verify code input output =
+            use inS = new StringReader(input)
+            use outS = new StringWriter()
+            let count = run (parse code) 0UL inS outS
+
+            Assert.Equal(output, outS.ToString()) 
+
+        let private verifyOptimized code input output expectedInsns =
+            use inS = new StringReader(input)
+            use outS = new StringWriter()
+            let count = run (parse code) 0UL inS outS
+
+            Assert.Equal(output, outS.ToString()) 
+            Assert.Equal(expectedInsns, count)
+
+        [<Theory>] 
+        [<InlineData("@", "", "", 0)>]
+        [<InlineData("99*76*+.@", "", "123 ", 2)>]
+        [<InlineData("&,@", "65 ", "A", 2)>]
+        [<InlineData("~.@", "A", "65 ", 2)>]
+        [<InlineData("665+*1-,@", "", "A", 2)>]
+        [<InlineData("665+*1-.@", "", "65 ", 2)>]
+        [<InlineData(">123...@", "", "3 2 1 ", 6)>]
+        [<InlineData(">123#...@", "", "3 2 ", 5)>]
+        [<InlineData("123.$.@", "", "3 1 ", 6)>]
+        [<InlineData("123\\...@", "", "2 3 1 ", 6)>]
+        [<InlineData("65`.@", "", "1 ", 2)>]
+        [<InlineData("25`.@", "", "0 ", 2)>]
+        let specExample code input output insns =
+            verifyOptimized code input output insns
+
+        [<Theory>]
+        [<InlineData("\"ver\",,,@", "", "rev")>]
+
+        [<InlineData("1!.@", "", "0 ")>]
+        [<InlineData("2!.@", "", "0 ")>]
+        [<InlineData("0!.@", "", "1 ")>]
+
+        [<InlineData("1..@", "", "1 0 ")>] // popping empty stack produces 0
+
+        [<InlineData("1:..@", "", "1 1 ")>] // dup works
+
+        [<InlineData("~:,,@", "A", "AA")>]
+
+        [<InlineData("<@,~", "A", "A")>]
+        let myTests code input output =
+            verify code input output
+
+
+        [<Theory>]
+        [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
+        [<InlineData("samples-factorial.bf", "2 ", "2 ")>]
+        [<InlineData("samples-factorial.bf", "3 ", "6 ")>]
+        [<InlineData("samples-factorial.bf", "5 ", "120 ")>]
+        // [<InlineData("samples-sieve.bf", "10 ", "2 ")>]
+        // uses 'p'
+        [<InlineData("samples-convert.bf", "", "234 ")>]
+        let sampleFiles file input output = 
+            verify (File.ReadAllText file) input output
+
+        [<Theory>]
+        [<InlineData("64+\"!dlroW ,olleH\">:#,_@", "", "Hello, World!\n")>]
+        [<InlineData("~:1+!#@_,", "this is cat", "this is cat")>]
+        let samplePrograms code input output = 
+            verify code input output
+        
+        [<Theory>]
+        [<InlineData("01->1# +# :# 0# g# ,# :# 5# 8# *# 4# +# -# _@")>]
+        // [<InlineData("0v\n<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
+        // [<InlineData(":0g,:\"~\"`#@_1+0\"Quines are Fun\">_")>]
+        let quines q = 
+            verify q "" q
