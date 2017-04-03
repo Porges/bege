@@ -80,7 +80,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <Compile Include="Program.fs" />
-    <None Include="ReadMe.md" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="ApprovalTests">
