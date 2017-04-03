@@ -434,8 +434,7 @@ module V4
             let counts = countReferences m
 
             let canBeInlined fs =
-                fs <> programEntryState // can't inline entry state!
-                && counts.[fs] = 1
+                counts.[fs] = 1
             
             let isJump fs =
                 match m.[fs] with
@@ -469,7 +468,7 @@ module V4
 
             let newCounts = countReferences result
 
-            result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState)
+            result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState (* can't remove entry state *))
 
         let rec optimizeChain = function
             // constant folding
@@ -628,9 +627,9 @@ module V4
         [<InlineData("~:,,@", "A", "AA")>]
 
         [<InlineData("<@,~", "A", "A")>]
+
         let myTests code input output =
             verify code input output
-
 
         [<Theory>]
         [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
@@ -653,5 +652,6 @@ module V4
         [<InlineData("01->1# +# :# 0# g# ,# :# 5# 8# *# 4# +# -# _@")>]
         // [<InlineData("0v\n<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
         // [<InlineData(":0g,:\"~\"`#@_1+0\"Quines are Fun\">_")>]
+        // ^ inserts extraneous spaces
         let quines q = 
             verify q "" q
