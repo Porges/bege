@@ -63,10 +63,6 @@
     <Compile Include="AssemblyInfo.fs" />
     <None Include="App.config" />
     <Content Include="packages.config" />
-    <Compile Include="Version1.fs" />
-    <Compile Include="Version2.fs" />
-    <Compile Include="Version3.fs" />
-    <Compile Include="Version4.fs" />
     <None Include="samples-convert.bf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -79,6 +75,15 @@
     <None Include="samples-bill.bf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Compile Include="Common.fs" />
+    <Compile Include="LCG.fs" />
+    <Compile Include="Parser.fs" />
+    <Compile Include="Runtime.fs" />
+    <Compile Include="AST.fs" />
+    <Compile Include="Optimizer.fs" />
+    <Compile Include="Renderer.fs" />
+    <Compile Include="Compiler.fs" />
+    <Compile Include="Tests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -26,20 +26,20 @@ let executeProgram befungeType =
     let seed = Guid.NewGuid().GetHashCode()
     let c =
         Activator.CreateInstance(befungeType, Console.In, Console.Out, uint64(seed))
-        :?> V4.BefungeBase
+        :?> Bege.Runtime.BefungeBase
 
     c.Run ()
 
 let run options : unit =
     let prog =
         try
-            V4.parse (File.ReadAllText options.input)
+            Bege.Parser.parse (File.ReadAllText options.input)
         with
         | :? FileNotFoundException as ex ->
             let msg = sprintf "File '%s' does not exist." options.input
             raise <| FatalException(msg, ExitCodes.InputNotFound, ex)
 
-    let compiled = V4.compile options.output prog options.optimize
+    let compiled = Bege.Compiler.compile options.output prog options.optimize
 
     // if we didn't save an output file then execute it straight away:
     if options.output.IsNone
