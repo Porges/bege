@@ -66,11 +66,16 @@ let rec optimizeChain = function
     | Push x :: Push y :: Multiply :: is -> optimizeChain (Push (x * y) :: is)
     | Push x :: Push y :: Subtract :: is -> optimizeChain (Push (x - y) :: is)
     | Push x :: Push y :: Greater :: is -> optimizeChain (Push (Convert.ToInt32(x > y)) :: is)
+    | Push x :: Not :: is -> optimizeChain (Push (Convert.ToInt32((x = 0))) :: is)
+    // eliminate unneeded nots
+    | Not :: Not :: is -> optimizeChain is
     // eliminate unneeded flips
     | Push x :: Push y :: Flip :: is -> optimizeChain (Push y :: Push x :: is)
+    | Flip :: Flip :: is -> optimizeChain is
+    | Dup :: Flip :: is -> optimizeChain is
     // eliminate dead pushes
     | Push x :: Pop :: is -> optimizeChain is
-    // identical branches
+    | Dup :: Pop :: is -> optimizeChain is
     | (i :: is) -> i :: optimizeChain is
     | [] -> []
 
