@@ -79,23 +79,29 @@ let rec optimizeChain = function
     | (i :: is) -> i :: optimizeChain is
     | [] -> []
 
-let optimizeLast fs = function
+let optimizeLast fs noInstructions = function
+    // identical branches
     | Branch (l, r) when l = r -> ToState r
+
+    // Rand with all identical:
     | Rand (a, b, c, d) when a = b && b = c && c = d -> ToState d
 
-    // Two orders to check here - since Rand is always ordered,
+    // Rand that loops back to same function must eventually branch to another,
+    // so if there are no instructions in this function we could just jump instead.
+    //
+    // There are two orders to check here - since Rand is always ordered (via ord4),
     // either fs < all or fs > all:
-    | Rand (a, b, c, d) when a = fs && b = c && c = d -> ToState d
-    | Rand (a, b, c, d) when a = fs && b = fs && c = d -> ToState d
-    | Rand (a, b, c, d) when a = fs && b = fs && c = fs -> ToState d
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = c && c = d -> ToState d
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = d -> ToState d
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = fs -> ToState d
 
-    | Rand (a, b, c, d) when a = b && b = c && d = fs -> ToState a
-    | Rand (a, b, c, d) when a = b && c = fs && d = fs -> ToState a
-    | Rand (a, b, c, d) when b = fs && c = fs && d = fs -> ToState a
+    | Rand (a, b, c, d) when noInstructions && a = b && b = c && d = fs -> ToState a
+    | Rand (a, b, c, d) when noInstructions && a = b && c = fs && d = fs -> ToState a
+    | Rand (a, b, c, d) when noInstructions && b = fs && c = fs && d = fs -> ToState a
 
     | c -> c
 
-let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast fs last))
+let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast fs (List.isEmpty insns) last))
 
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
     let states1 = m |> Map.toSeq |> Seq.map fst
