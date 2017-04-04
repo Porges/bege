@@ -104,19 +104,15 @@ let optimizeLast fs noInstructions = function
 let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast fs (List.isEmpty insns) last))
 
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
-    let states1 = m |> Map.toSeq |> Seq.map fst
 
     // invert the map, now all states with the same instruction list are in the same slot
     let inverted = invertMap m
-    let states2 = inverted |> Map.toSeq |> Seq.map fst
 
     // pick one state to represent the others (the 'minimum')
     let newMappings : Map<IPState, IPState> =
         Map.fold (fun m _ fss ->
             let min = List.min fss in
             List.fold (fun m fs -> Map.add fs min m) m fss) Map.empty inverted
-
-    let states2 = newMappings |> Map.toSeq |> Seq.map fst
 
     // rewrite all the last-instructions to remap their states
     inverted
