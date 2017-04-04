@@ -1,7 +1,4 @@
-﻿
-
-
-module Bege.Tests
+﻿module Bege.Tests
 
 open Xunit
 open System.IO
