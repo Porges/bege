@@ -7,6 +7,7 @@ open System.Reflection
 
 [<AbstractClass>]
 type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uint64) =
+
     let stack = Stack<int>()
     let mutable lcg = LCG.createKnuth seed
     let mutable count = 0
@@ -16,6 +17,8 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
 
     let pop() : int = if stack.Count > 0 then stack.Pop() else 0
     let push(value) : unit = stack.Push value
+
+    new(progText : string) = BefungeBase(Console.In, Console.Out, progText, uint64(Guid.NewGuid().GetHashCode()))
 
     abstract member Run : unit -> int
 
@@ -106,6 +109,9 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
         let b = pop()
         push(b / a)
 
+    member x.Interpret() : unit =
+        ()
+
 module BaseMethods = 
     let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
     let pop = m "Pop"
@@ -124,5 +130,6 @@ module BaseMethods =
     let greater = m "Greater"
     let readText = m "ReadText"
     let rand = m "Rand"
-    let ctor = typeof<BefungeBase>.GetConstructors() |> Seq.exactlyOne
+    let ctor = typeof<BefungeBase>.GetConstructor([| typeof<TextReader>; typeof<TextWriter>; typeof<string>; typeof<uint64> |])
+    let easyCtor = typeof<BefungeBase>.GetConstructor([| typeof<string> |])
     let count = m "GetCount"

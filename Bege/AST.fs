@@ -53,7 +53,10 @@ type LastInstruction =
     | Branch of zero : IPState * nonZero : IPState
     | Rand of IPState * IPState * IPState * IPState
 
-let computeChains (prog : Parser.Program) : Map<IPState, Instruction list * LastInstruction> =
+type Chain = Instruction list * LastInstruction
+type Program = Map<IPState, Instruction list * LastInstruction>
+
+let computeChains (prog : Parser.Program) : Program =
     
     let toCompile = System.Collections.Generic.Queue<IPState>()
     let visited = System.Collections.Generic.HashSet<IPState>()

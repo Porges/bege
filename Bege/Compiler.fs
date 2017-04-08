@@ -10,12 +10,12 @@ open System
 open System.IO
 open System.Text
 
-let toText (prog : Program) : string =
+let toText (prog : Parser.Program) : string =
     let sb = StringBuilder(Array2D.length1 prog * Array2D.length2 prog)
     prog |> Array2D.iter (fun c -> sb.Append c |> ignore)
     sb.ToString()
 
-let compile (fileName : string option) (prog : Program) shouldOptimize : Type =
+let compile (fileName : string option) (prog : Parser.Program) shouldOptimize : Type =
     computeChains prog 
     |> (fun p -> if shouldOptimize then optimize p else p)
     |> buildType fileName (toText prog)
