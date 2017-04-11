@@ -20,6 +20,7 @@ let private verifyOptimized code input output expectedInsns =
     Assert.Equal(output, outS.ToString()) 
     Assert.Equal(expectedInsns, count)
 
+(* Examples from the GitHub spec *)
 [<Theory>] 
 [<InlineData("@", "", "", 0)>]
 [<InlineData("99*76*+.@", "", "123 ", 2)>]
@@ -36,23 +37,29 @@ let private verifyOptimized code input output expectedInsns =
 let specExample code input output insns =
     verifyOptimized code input output insns
 
-[<Theory>]
-[<InlineData("\"ver\",,,@", "", "rev")>]
+let ``strings are pushed backward``() =
+    verify "\"ver\",,,@" "" "rev"
 
-[<InlineData("1!.@", "", "0 ")>]
-[<InlineData("2!.@", "", "0 ")>]
-[<InlineData("0!.@", "", "1 ")>]
+let ``dup works``() =
+    verify "1:..@", "", "1 1 "
 
-[<InlineData("1..@", "", "1 0 ")>] // popping empty stack produces 0
+let ``read dup write write`` () =
+    verify "~:,,@" "A" "AA"
 
-[<InlineData("1:..@", "", "1 1 ")>] // dup works
+let ``popping empty stack produces zero``() =
+    verify "1..@" "" "1 0 "
 
-[<InlineData("~:,,@", "A", "AA")>]
+let ``not 1 is 0``() =
+    verify "1!.@" "" "0 "
 
-[<InlineData("<@,~", "A", "A")>]
+let ``not 2 is 0``() =
+    verify "2!.@" "" "0 "
 
-let myTests code input output =
-    verify code input output
+let ``not 0 is 1``() =
+    verify "1!.@" "" "1 "
+
+let ``can wrap around from first position`` () =
+    verify "<@,~" "A" "A"
 
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
@@ -60,7 +67,7 @@ let myTests code input output =
 [<InlineData("samples-factorial.bf", "3 ", "6 ")>]
 [<InlineData("samples-factorial.bf", "5 ", "120 ")>]
 // [<InlineData("samples-sieve.bf", "10 ", "2 ")>]
-// uses 'p'
+// uses 'p', not supported
 [<InlineData("samples-convert.bf", "", "234 ")>]
 let sampleFiles file input output = 
     verify (File.ReadAllText file) input output
@@ -76,5 +83,5 @@ let samplePrograms code input output =
 // [<InlineData("0v\n<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
 // [<InlineData(":0g,:\"~\"`#@_1+0\"Quines are Fun\">_")>]
 // ^ inserts extraneous spaces
-let quines q = 
+let quine q = 
     verify q "" q
