@@ -89,9 +89,14 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
     let buildMethod fs (method : MethodBuilder, (instructions, lastInstruction)) =
         // printfn "Emitting method: %s" (nameFromState fs)
         let il = method.GetILGenerator()
+        let l1 = il.DeclareLocal(typeof<int>)
+        let l2 = il.DeclareLocal(typeof<int>)
 
         let callBase (mi : MethodInfo) =
             il.Emit(OpCodes.Ldarg_0)
+            il.Emit(OpCodes.Call, mi)
+
+        let callBaseStatic (mi : MethodInfo) =
             il.Emit(OpCodes.Call, mi)
         
         let tailTo (mi : MethodInfo) =
@@ -100,27 +105,49 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
             il.Emit(OpCodes.Call, mi)
             il.Emit(OpCodes.Ret)
 
+        let emitFlip() =
+            il.Emit(OpCodes.Stloc_0)
+            il.Emit(OpCodes.Stloc_1)
+            il.Emit(OpCodes.Ldloc_0)
+            il.Emit(OpCodes.Ldloc_1)
+
         let emit = function
-            | Push value ->
-                il.Emit(OpCodes.Ldarg_0)
-                il.Emit(OpCodes.Ldc_I4, value)
-                il.Emit(OpCodes.Call, BaseMethods.push)
-            | Pop ->
-                callBase BaseMethods.pop
-                il.Emit(OpCodes.Pop) // ignore result
-            | Flip -> callBase BaseMethods.flip
-            | Dup -> callBase BaseMethods.dup
-            | OutputChar -> callBase BaseMethods.outputChar
+            | Load value ->
+                match value with
+                | -1 -> il.Emit(OpCodes.Ldc_I4_M1)
+                | 0 -> il.Emit(OpCodes.Ldc_I4_0)
+                | 1 -> il.Emit(OpCodes.Ldc_I4_1)
+                | 2 -> il.Emit(OpCodes.Ldc_I4_2)
+                | 3 -> il.Emit(OpCodes.Ldc_I4_3)
+                | 4 -> il.Emit(OpCodes.Ldc_I4_4)
+                | 5 -> il.Emit(OpCodes.Ldc_I4_5)
+                | 6 -> il.Emit(OpCodes.Ldc_I4_6)
+                | 7 -> il.Emit(OpCodes.Ldc_I4_7)
+                | 8 -> il.Emit(OpCodes.Ldc_I4_8)
+                | v -> il.Emit(OpCodes.Ldc_I4, v)
+            | Push -> callBase BaseMethods.push
+            | Pop -> callBase BaseMethods.pop
+            | Discard -> il.Emit(OpCodes.Pop)
+            | Flip ->
+                emitFlip()
+            | Dup -> il.Emit(OpCodes.Dup)
             | InputChar -> callBase BaseMethods.inputChar
             | InputNumber -> callBase BaseMethods.inputNumber
+            | OutputChar -> callBase BaseMethods.outputChar
             | OutputNumber -> callBase BaseMethods.outputNumber
-            | Not -> callBase BaseMethods.not
-            | Add -> callBase BaseMethods.add
-            | Multiply -> callBase BaseMethods.multiply
-            | Divide -> callBase BaseMethods.divide
-            | Subtract -> callBase BaseMethods.subtract
-            | Greater -> callBase BaseMethods.greater
-            | ReadText -> callBase BaseMethods.readText
+            | BinOp Add -> il.Emit(OpCodes.Add)
+            | BinOp Multiply -> il.Emit(OpCodes.Mul)
+            | BinOp Divide ->
+                emitFlip()
+                il.Emit(OpCodes.Div)
+            | BinOp Subtract -> 
+                emitFlip()
+                il.Emit(OpCodes.Sub)
+            | ReadText ->
+                emitFlip()
+                callBase BaseMethods.readText
+            | BinOp Greater -> callBaseStatic BaseMethods.greater
+            | UnOp Not -> callBaseStatic BaseMethods.not
 
         let emitLast = function
             | Rand (a, b, c, d) ->
@@ -145,7 +172,6 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
             | Branch (zero, nonZero) ->
                 let (zMethod, _) = definedMethods.[zero]
                 let (nzMethod, _) = definedMethods.[nonZero]
-                callBase BaseMethods.pop
                 let zeroTarget = il.DefineLabel()
                 il.Emit(OpCodes.Brfalse, zeroTarget)
                 tailTo nzMethod

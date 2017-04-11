@@ -41,18 +41,19 @@ let private verifyOptimized code input output expectedInsns =
 (* Examples from the GitHub spec *)
 [<Theory>] 
 [<InlineData("@", "", "", 0)>]
-[<InlineData("99*76*+.@", "", "123 ", 2)>]
+[<InlineData("99*76*+.@", "", "123 ", 1)>]
 [<InlineData("&,@", "65 ", "A", 2)>]
 [<InlineData("~.@", "A", "65 ", 2)>]
-[<InlineData("665+*1-,@", "", "A", 2)>]
-[<InlineData("665+*1-.@", "", "65 ", 2)>]
-[<InlineData(">123...@", "", "3 2 1 ", 6)>]
+[<InlineData("665+*1-,@", "", "A", 1)>]
+[<InlineData("665+*1-.@", "", "65 ", 1)>]
+[<InlineData(">123...@", "", "3 2 1 ", 7)>]
 [<InlineData(">123#...@", "", "3 2 ", 5)>]
 [<InlineData("123.$.@", "", "3 1 ", 6)>]
-[<InlineData("123\\...@", "", "2 3 1 ", 6)>]
-[<InlineData("65`.@", "", "1 ", 2)>]
-[<InlineData("25`.@", "", "0 ", 2)>]
+[<InlineData("123\\...@", "", "2 3 1 ", 9)>]
+[<InlineData("65`.@", "", "1 ", 1)>]
+[<InlineData("25`.@", "", "0 ", 1)>]
 let specExample code input output insns =
+    verify code input output
     verifyOptimized code input output insns
 
 [<Fact>]
@@ -89,7 +90,7 @@ let ``can wrap around from first position`` () =
 
 [<Fact>]
 let ``optimized branch still pops`` ()  =
-    verifyOptimized "12v\n@._.@" "" "1 " 2
+    verifyOptimized "12v\n@._.@" "" "1 " 1
 
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]

@@ -36,18 +36,24 @@ let advance (ip : IPState) =
     let y' = if y' < 0 then y' + 80 else y' % 80
     { ip with position = struct (x', y') }
 
+type BinOp = 
+    | Add | Multiply | Divide | Subtract | Greater
+
+type UnOp =
+    | Not
+
 type Instruction = 
-    | Push of int
-    | Pop
+    | Load of int
+    | Push | Pop
+    | Discard
     | Dup | Flip
     | OutputNumber
     | InputNumber
     | OutputChar
     | InputChar
-    | Add | Multiply | Divide | Subtract
-    | Not
-    | Greater
     | ReadText
+    | BinOp of BinOp
+    | UnOp of UnOp
 
 type LastInstruction =
     | Exit
@@ -83,13 +89,15 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
 
         let rec follow chain (ip : IPState) : (Instruction list * LastInstruction) = 
 
-            let go x = follow (x :: chain) (advance ip)
+            let go xs =
+                follow (List.append (List.rev xs) chain) (advance ip)
 
             let branchChain(dir) =
                 let next = advance { ip with dir = dir }
                 toVisit next
                 next
 
+            let endChainWith c x = (List.rev (c :: chain), x)
             let endChain x = (List.rev chain, x)
 
             let newChain dir = 
@@ -97,40 +105,46 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
                 toVisit next
                 endChain (ToState next)
 
+            let binOp o =
+                go [ Pop; Pop; BinOp o; Push]
+
+            let unOp o =
+                go [ Pop; UnOp o; Push ]
+
             match read ip.position with
             | '>' -> newChain Dir.Right
             | '<' -> newChain Dir.Left
             | '^' -> newChain Dir.Up
             | 'v' -> newChain Dir.Down
-            | d when d >= '0' && d <= '9' -> go (Push (int(d) - int('0'))) 
-            | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go (Push (int(h) - int('a') + 10))
-            | '$' -> go Pop
+            | d when d >= '0' && d <= '9' -> go [Load (int(d) - int('0')); Push]
+            | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go [Load (int(h) - int('a') + 10); Push]
+            | '$' -> go [Pop; Discard]
             | ' ' -> follow chain (advance ip)
             | '#' -> follow chain (advance (advance ip))
             | '"' -> readString chain (advance ip)
             | '@' -> endChain Exit
-            | '~' -> go InputChar
-            | '&' -> go InputNumber
-            | ':' -> go Dup
-            | '\\' -> go Flip
-            | '.' -> go OutputNumber
-            | ',' -> go OutputChar
-            | '!' -> go Not
+            | '~' -> go [InputChar; Push]
+            | '&' -> go [InputNumber; Push]
+            | ':' -> go [Pop; Dup; Push; Push]
+            | '\\' -> go [Pop; Pop; Flip; Push; Push]
+            | '.' -> go [Pop; OutputNumber]
+            | ',' -> go [Pop; OutputChar]
+            | '!' -> unOp Not
             | '?' -> endChain (Rand (sort4 (branchChain Dir.Left, branchChain Dir.Right, branchChain Dir.Up, branchChain Dir.Down)))
-            | '+' -> go Add
-            | '-' -> go Subtract
-            | '/' -> go Divide
-            | '*' -> go Multiply
-            | '_' -> endChain (Branch (branchChain Dir.Right, branchChain Dir.Left))
-            | '|' -> endChain (Branch (branchChain Dir.Up, branchChain Dir.Down))
-            | '`' -> go Greater
-            | 'g' -> go ReadText
+            | '+' -> binOp Add
+            | '-' -> binOp Subtract
+            | '/' -> binOp Divide
+            | '*' -> binOp Multiply
+            | '_' -> endChainWith Pop (Branch (branchChain Dir.Right, branchChain Dir.Left))
+            | '|' -> endChainWith Pop (Branch (branchChain Dir.Up, branchChain Dir.Down))
+            | '`' -> binOp Greater
+            | 'g' -> go [Pop; Pop; ReadText; Push]
             | ';' -> checkYear 98 ';'; readComment chain (advance ip)
             | c -> raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
         and readString acc (state : IPState) : (Instruction list * LastInstruction) =
             match read state.position with
             | '"' -> follow acc (advance state)
-            | c -> readString (Push (int c) :: acc) (advance state)
+            | c -> readString (Push :: Load (int c) :: acc) (advance state)
         and readComment chain (state : IPState) =
             match read state.position with
             | ';' -> follow chain (advance state)

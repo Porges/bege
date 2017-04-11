@@ -74,53 +74,51 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
     let mutable lcg = LCG.createKnuth seed
     let mutable count = 0
 
-    let addCount() : unit =
-        count <- count + 1
-
-    let pop() : int = if stack.Count > 0 then stack.Pop() else 0
-    let push(value) : unit = stack.Push value
-
     new(progText : string) = BefungeBase(Console.In, Console.Out, progText, uint64(Guid.NewGuid().GetHashCode()))
 
     abstract member Run : unit -> int
+
+    member x.Text
+        with get() = progText
+
+    member x.Reader
+        with get() = tr
+
+    member x.Writer
+        with get() = tw
+    
+    member x.Stack
+        with get() = stack
+
+    member x.AddCount() : unit =
+        count <- count + 1
 
     member x.GetCount() =
         count
 
     member x.Rand() : int =
-        addCount()
+        x.AddCount()
         lcg <- LCG.next lcg
         int (LCG.bits 2 lcg)
 
-    member x.Push value : unit =
-        addCount()
-        push(value)
-
     member x.Pop() =
-        addCount()
-        pop()
+        x.AddCount()
+        if stack.Count > 0 then stack.Pop() else 0
 
-    member x.Dup() : unit =
-        addCount ()
-        if stack.Count > 0 then push(stack.Peek()) else push(0)
+    static member Push (value : int32, x : BefungeBase) : unit =
+        x.AddCount()
+        x.Stack.Push value
 
-    member x.Flip() : unit =
-        addCount()
-        let a = pop()
-        let b = pop()
-        push(a)
-        push(b)
+    member x.InputChar() : int32 =
+        x.AddCount()
+        tr.Read()
 
-    member x.InputChar() : unit =
-        addCount()
-        push (tr.Read())
+    static member OutputChar(c : int32, x : BefungeBase) : unit =
+        x.AddCount()
+        fprintf x.Writer "%c" (char(c))
 
-    member x.OutputChar() : unit =
-        addCount()
-        fprintf tw "%c" (char(pop()))
-
-    member x.InputNumber() : unit =
-        addCount()
+    member x.InputNumber() : int32 =
+        x.AddCount()
 
         let mutable read = ""
         let mutable r = 0
@@ -128,67 +126,37 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
             read <- read + string(char(r))
 
         match Int32.TryParse read with
-        | (true, value) -> push(value)
+        | (true, value) -> value
         | _ -> raise <| InvalidDataException()
 
-    member x.ReadText() : unit =
-        addCount()
-        let a = pop()
-        let b = pop()
-        push(int(progText.[a*25 + b]))
+    static member ReadText(b : int32, a : int32, x : BefungeBase) : int32 =
+        x.AddCount()
+        int32(x.Text.[a*25 + b])
 
-    member x.OutputNumber() : unit =
-        addCount()
-        fprintf tw "%d " (pop())
+    static member OutputNumber(v : int32, x : BefungeBase) : unit =
+        x.AddCount()
+        fprintf x.Writer "%d " v
 
-    member x.Greater() : unit =
-        addCount()
-        let a = pop()
-        let b = pop()
-        push(Convert.ToInt32(b > a))
+    static member Greater(a : int32, b : int32) : int32 =
+        //x.AddCount()
+        Convert.ToInt32(b > a)
         
-    member x.Not() : unit =
-        addCount()
-        if pop() = 0 then push(1) else push(0)
-
-    member x.Add() : unit =
-        addCount()
-        push(pop() + pop())
-
-    member x.Subtract() : unit = 
-        addCount()
-        let a = pop()
-        let b = pop()
-        push(b - a)
-
-    member x.Multiply() : unit =
-        addCount()
-        push(pop() * pop())
-
-    member x.Divide() : unit =
-        addCount()
-        let a = pop()
-        let b = pop()
-        push(b / a)
+    static member Not(v : int32) : int32 =
+        //addCount()
+        if v = 0 then 1 else 0
 
     member x.Interpret() : unit =
         ()
 
 module BaseMethods = 
-    let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
+    let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Static ||| BindingFlags.Public)
     let pop = m "Pop"
     let push = m "Push"
-    let dup = m "Dup"
-    let flip = m "Flip"
     let outputChar = m "OutputChar"
     let inputChar = m "InputChar"
     let inputNumber = m "InputNumber"
     let outputNumber = m "OutputNumber"
     let not = m "Not"
-    let add = m "Add"
-    let subtract = m "Subtract"
-    let multiply = m "Multiply"
-    let divide = m "Divide"
     let greater = m "Greater"
     let readText = m "ReadText"
     let rand = m "Rand"

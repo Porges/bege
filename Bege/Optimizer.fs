@@ -60,22 +60,33 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
     result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState (* can't remove entry state *))
 
 let rec peepholeOptimize = function
+    // Unneeded push/pops
+    | Push :: Pop :: is -> peepholeOptimize is
+    | Dup :: Pop :: is -> peepholeOptimize is
+    | Load _ :: Discard :: is -> peepholeOptimize is
     // constant folding
-    | Push x :: Push y :: Add :: is -> peepholeOptimize (Push (x + y) :: is)
-    | Push x :: Push y :: Divide :: is -> peepholeOptimize (Push (x / y) :: is)
-    | Push x :: Push y :: Multiply :: is -> peepholeOptimize (Push (x * y) :: is)
-    | Push x :: Push y :: Subtract :: is -> peepholeOptimize (Push (x - y) :: is)
-    | Push x :: Push y :: Greater :: is -> peepholeOptimize (Push (Convert.ToInt32(x > y)) :: is)
-    | Push x :: Not :: is -> peepholeOptimize (Push (Convert.ToInt32((x = 0))) :: is)
+    | Load b :: Push :: Load a :: Pop :: BinOp k :: is ->
+        let apply a b =
+            match k with
+            | Add -> b + a
+            | Subtract -> b - a
+            | Multiply -> b * a
+            | Divide -> b / a
+            | Greater -> if b > a then 1 else 0
+        peepholeOptimize (Load (apply a b) :: is)
+    //| Push x :: Push y :: Add :: is -> peepholeOptimize (Push (x + y) :: is)
+    //| Push x :: Push y :: Divide :: is -> peepholeOptimize (Push (x / y) :: is)
+    //| Push x :: Push y :: Multiply :: is -> peepholeOptimize (Push (x * y) :: is)
+    //| Push x :: Push y :: Subtract :: is -> peepholeOptimize (Push (x - y) :: is)
+    //| Push x :: Push y :: Greater :: is -> peepholeOptimize (Push (Convert.ToInt32(x > y)) :: is)
+    //| Push x :: Not :: is -> peepholeOptimize (Push (Convert.ToInt32((x = 0))) :: is)
     // eliminate unneeded nots
-    | Not :: Not :: is -> peepholeOptimize is
+    | UnOp Not :: UnOp Not :: is -> peepholeOptimize is
     // eliminate unneeded flips
-    | Push x :: Push y :: Flip :: is -> peepholeOptimize (Push y :: Push x :: is)
+    //| Push :: Push :: Pop :: Pop :: Flip :: is -> peepholeOptimize (Push y :: Push x :: is)
     | Flip :: Flip :: is -> peepholeOptimize is
     | Dup :: Flip :: is -> Dup :: peepholeOptimize is
     // eliminate dead pushes
-    | Push x :: Pop :: is -> peepholeOptimize is
-    | Dup :: Pop :: is -> peepholeOptimize is
     | (i :: is) -> i :: peepholeOptimize is
     | [] -> []
 
@@ -83,8 +94,8 @@ let optimizeLast fs instructions last =
     let noInstructions = List.isEmpty instructions
 
     match last with
-    // identical branches - change to unconditional pop/jump
-    | Branch (l, r) when l = r -> (List.append instructions [Pop], ToState r)
+    // identical branches - change to unconditional jump
+    | Branch (l, r) when l = r -> (List.append instructions [Discard], ToState r)
 
     // Rand with all identical:
     | Rand (a, b, c, d) when a = b && b = c && c = d -> (instructions, ToState d)
