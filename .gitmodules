@@ -1,0 +1,3 @@
+[submodule "Bege.Tests/Mycology"]
+	path = Bege.Tests/Mycology
+	url = https://github.com/Deewiant/Mycology
