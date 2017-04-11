@@ -3,10 +3,9 @@
 open System
 open System.Text.RegularExpressions
 
-// CommandLineParser case-insensitivity doesn't work at the moment
-// FUTURE: write own command line parser :)
 type Topology = Unefunge | Befunge | Trefunge
 
+[<StructuredFormatDisplay("{topology}{year}")>]
 type Standard = { topology : Topology ; year : int }
     with 
     static member TryParse s =
@@ -24,8 +23,6 @@ type Standard = { topology : Topology ; year : int }
             let year = Int32.Parse(m.Groups.["year"].Value)
 
             Some { topology = topo; year = year }
-    override this.ToString() =
-        this.topology.ToString() + this.year.ToString()
 
 let befunge93 = { topology = Befunge; year = 93 }
 let befunge98 = { topology = Befunge; year = 98 }
