@@ -4,6 +4,8 @@
 module Bege.AST
 
 open System.Text
+open Bege.Common
+open Bege.Options
 
 /// Sorts a tuple of 4 elements
 let sort4 (a, b, c, d) =
@@ -56,7 +58,14 @@ type LastInstruction =
 type Chain = Instruction list * LastInstruction
 type Program = Map<IPState, Instruction list * LastInstruction>
 
-let computeChains (prog : Parser.Program) : Program =
+let computeChains (prog : Parser.Program) (options : Options) : Program =
+
+    let checkYear y command = 
+        if y > options.standard.year
+        then
+            let allowedIn = { options.standard with year = y }
+            let msg = sprintf "The command '%c' is only available in %A." command allowedIn
+            raise <| FatalException(msg, ExitCodes.CommandNotSupported)
     
     let toCompile = System.Collections.Generic.Queue<IPState>()
     let visited = System.Collections.Generic.HashSet<IPState>()
@@ -94,7 +103,7 @@ let computeChains (prog : Parser.Program) : Program =
             | '^' -> newChain Dir.Up
             | 'v' -> newChain Dir.Down
             | d when d >= '0' && d <= '9' -> go (Push (int(d) - int('0'))) 
-            | h when h >= 'a' && h <= 'f' -> go (Push (int(h) - int('a') + 10)) // '98 extension
+            | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go (Push (int(h) - int('a') + 10))
             | '$' -> go Pop
             | ' ' -> follow chain (advance ip)
             | '#' -> follow chain (advance (advance ip))
@@ -116,11 +125,16 @@ let computeChains (prog : Parser.Program) : Program =
             | '|' -> endChain (Branch (branchChain Dir.Up, branchChain Dir.Down))
             | '`' -> go Greater
             | 'g' -> go ReadText
-            | c -> raise <| System.NotSupportedException("Instruction not supported: " + string(c))
+            | ';' -> checkYear 98 ';'; readComment chain (advance ip)
+            | c -> raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
         and readString acc (state : IPState) : (Instruction list * LastInstruction) =
             match read state.position with
             | '"' -> follow acc (advance state)
             | c -> readString (Push (int c) :: acc) (advance state)
+        and readComment chain (state : IPState) =
+            match read state.position with
+            | ';' -> follow chain (advance state)
+            | c -> readComment chain (advance state)
         
         let start = toCompile.Dequeue()
         chains <- Map.add start (follow [] start) chains

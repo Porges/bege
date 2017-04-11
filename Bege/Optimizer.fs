@@ -59,49 +59,53 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
 
     result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState (* can't remove entry state *))
 
-let rec optimizeChain = function
+let rec peepholeOptimize = function
     // constant folding
-    | Push x :: Push y :: Add :: is -> optimizeChain (Push (x + y) :: is)
-    | Push x :: Push y :: Divide :: is -> optimizeChain (Push (x / y) :: is)
-    | Push x :: Push y :: Multiply :: is -> optimizeChain (Push (x * y) :: is)
-    | Push x :: Push y :: Subtract :: is -> optimizeChain (Push (x - y) :: is)
-    | Push x :: Push y :: Greater :: is -> optimizeChain (Push (Convert.ToInt32(x > y)) :: is)
-    | Push x :: Not :: is -> optimizeChain (Push (Convert.ToInt32((x = 0))) :: is)
+    | Push x :: Push y :: Add :: is -> peepholeOptimize (Push (x + y) :: is)
+    | Push x :: Push y :: Divide :: is -> peepholeOptimize (Push (x / y) :: is)
+    | Push x :: Push y :: Multiply :: is -> peepholeOptimize (Push (x * y) :: is)
+    | Push x :: Push y :: Subtract :: is -> peepholeOptimize (Push (x - y) :: is)
+    | Push x :: Push y :: Greater :: is -> peepholeOptimize (Push (Convert.ToInt32(x > y)) :: is)
+    | Push x :: Not :: is -> peepholeOptimize (Push (Convert.ToInt32((x = 0))) :: is)
     // eliminate unneeded nots
-    | Not :: Not :: is -> optimizeChain is
+    | Not :: Not :: is -> peepholeOptimize is
     // eliminate unneeded flips
-    | Push x :: Push y :: Flip :: is -> optimizeChain (Push y :: Push x :: is)
-    | Flip :: Flip :: is -> optimizeChain is
-    | Dup :: Flip :: is -> optimizeChain is
+    | Push x :: Push y :: Flip :: is -> peepholeOptimize (Push y :: Push x :: is)
+    | Flip :: Flip :: is -> peepholeOptimize is
+    | Dup :: Flip :: is -> Dup :: peepholeOptimize is
     // eliminate dead pushes
-    | Push x :: Pop :: is -> optimizeChain is
-    | Dup :: Pop :: is -> optimizeChain is
-    | (i :: is) -> i :: optimizeChain is
+    | Push x :: Pop :: is -> peepholeOptimize is
+    | Dup :: Pop :: is -> peepholeOptimize is
+    | (i :: is) -> i :: peepholeOptimize is
     | [] -> []
 
-let optimizeLast fs noInstructions = function
-    // identical branches
-    | Branch (l, r) when l = r -> ToState r
+let optimizeLast fs instructions last =
+    let noInstructions = List.isEmpty instructions
+
+    match last with
+    // identical branches - change to unconditional pop/jump
+    | Branch (l, r) when l = r -> (List.append instructions [Pop], ToState r)
 
     // Rand with all identical:
-    | Rand (a, b, c, d) when a = b && b = c && c = d -> ToState d
+    | Rand (a, b, c, d) when a = b && b = c && c = d -> (instructions, ToState d)
 
     // Rand that loops back to same function must eventually branch to another,
     // so if there are no instructions in this function we could just jump instead.
     //
     // There are two orders to check here - since Rand is always ordered (via ord4),
     // either fs < all or fs > all:
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = c && c = d -> ToState d
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = d -> ToState d
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = fs -> ToState d
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = c && c = d -> (instructions, ToState d)
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = d -> (instructions, ToState d)
+    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = fs -> (instructions, ToState d)
 
-    | Rand (a, b, c, d) when noInstructions && a = b && b = c && d = fs -> ToState a
-    | Rand (a, b, c, d) when noInstructions && a = b && c = fs && d = fs -> ToState a
-    | Rand (a, b, c, d) when noInstructions && b = fs && c = fs && d = fs -> ToState a
+    | Rand (a, b, c, d) when noInstructions && a = b && b = c && d = fs -> (instructions, ToState a)
+    | Rand (a, b, c, d) when noInstructions && a = b && c = fs && d = fs -> (instructions, ToState a)
+    | Rand (a, b, c, d) when noInstructions && b = fs && c = fs && d = fs -> (instructions, ToState a)
 
-    | c -> c
+    | c -> (instructions, c)
 
-let optimizeChains = Map.map (fun fs (insns, last) -> (fix optimizeChain insns, optimizeLast fs (List.isEmpty insns) last))
+let optimizeChain ipState (insns, last) = optimizeLast ipState (fix peepholeOptimize insns) last
+let optimizeChains = Map.map optimizeChain 
 
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
 

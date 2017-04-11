@@ -76,7 +76,7 @@
     </None>
     <Compile Include="Common.fs" />
     <Compile Include="LCG.fs" />
-    <Compile Include="GlobalOptions.fs" />
+    <Compile Include="Options.fs" />
     <Compile Include="Parser.fs" />
     <Compile Include="Runtime.fs" />
     <Compile Include="AST.fs" />

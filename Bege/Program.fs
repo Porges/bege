@@ -5,21 +5,15 @@ open System.IO
 
 open CommandLine
 
-type Options = {
-    [<Value(0, Required = true, MetaName = "input", HelpText = "The input file (e.g. \"file.bf\").")>] input : string;
-    [<Option('o', "output")>] output : string option;
-    [<Option('O', "optimize", Default = true)>] optimize : bool;
-}
+open Bege.Common
+open Bege.Options
 
-module ExitCodes =
-    let Success = 0
-    
-    let InvalidOptions = 400
-    let InputNotFound = 404
-
-type FatalException(message : string, exitCode : int, innerException : Exception) =
-    inherit Exception(message, innerException)
-    member e.ExitCode = exitCode
+type Arguments =
+    { [<Value(0, Required = true, MetaName = "input", HelpText = "The input file (e.g. \"file.bf\").")>] input : string
+    ; [<Option('o', "output")>] output : string option
+    ; [<Option('O', "optimize", Default = true)>] optimize : bool
+    ; [<Option("std", Default = "befunge98")>] standard : string
+    }
 
 let executeProgram befungeType = 
 
@@ -30,29 +24,39 @@ let executeProgram befungeType =
 
     c.Run ()
 
-let run options : unit =
+let run input (options : Options) : unit =
     let prog =
         try
-            Bege.Parser.parse (File.ReadAllText options.input)
+            Bege.Parser.parse (File.ReadAllText input)
         with
         | :? FileNotFoundException as ex ->
-            let msg = sprintf "File '%s' does not exist." options.input
+            let msg = sprintf "File '%s' does not exist." input
             raise <| FatalException(msg, ExitCodes.InputNotFound, ex)
 
-    let compiled = Bege.Compiler.compile options.output prog options.optimize
+    let compiled = Bege.Compiler.compile options prog
 
     // if we didn't save an output file then execute it straight away:
-    if options.output.IsNone
+    if options.outputFileName.IsNone
     then executeProgram compiled |> ignore; printfn ""
 
 [<EntryPoint>]
 let main argv = 
-    match Parser.Default.ParseArguments<Options> argv with
-    | :? Parsed<Options> as p ->
+    match Parser.Default.ParseArguments<Arguments> argv with
+    | :? Parsed<Arguments> as p ->
         try
-            run p.Value; 0
+            let args = p.Value
+            match Standard.TryParse args.standard with
+            | Some standard ->
+                run args.input 
+                    { standard = standard
+                    ; outputFileName = args.output
+                    ; optimize = args.optimize
+                    }
+                0
+            | None ->
+                raise <| FatalException(sprintf "Unsupported standard: %s" args.standard, ExitCodes.StandardNotSupported)
         with
         | :? FatalException as ex ->
-            eprintfn "Fatal: %s" ex.Message
+            eprintfn "[Fatal] %s" ex.Message
             ex.ExitCode
     | _ -> ExitCodes.InvalidOptions

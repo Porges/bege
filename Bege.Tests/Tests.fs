@@ -4,18 +4,36 @@ open Xunit
 open System.IO
 
 open Bege.Compiler
+open Bege.Options
 
 let private verify code input output =
-    use inS = new StringReader(input)
-    use outS = new StringWriter()
-    let count = run (Bege.Parser.parse code) 0UL inS outS
 
-    Assert.Equal(output, outS.ToString()) 
+    for optimize in [false; true] do
+        let options =
+            { outputFileName = None
+            ; optimize = optimize
+            ; standard = befunge98
+            }
+
+        use inS = new StringReader(input)
+        use outS = new StringWriter()
+        let program = Bege.Parser.parse code
+        let count = run options 0UL inS outS program
+
+        Assert.Equal(output, outS.ToString())
 
 let private verifyOptimized code input output expectedInsns =
+
+    let options =
+        { outputFileName = None
+        ; optimize = true
+        ; standard = befunge98
+        }
+
     use inS = new StringReader(input)
     use outS = new StringWriter()
-    let count = run (Bege.Parser.parse code) 0UL inS outS
+    let program = Bege.Parser.parse code
+    let count = run options 0UL inS outS program
 
     Assert.Equal(output, outS.ToString()) 
     Assert.Equal(expectedInsns, count)
@@ -37,29 +55,41 @@ let private verifyOptimized code input output expectedInsns =
 let specExample code input output insns =
     verifyOptimized code input output insns
 
+[<Fact>]
 let ``strings are pushed backward``() =
     verify "\"ver\",,,@" "" "rev"
 
+[<Fact>]
 let ``dup works``() =
     verify "1:..@", "", "1 1 "
 
+[<Fact>]
 let ``read dup write write`` () =
     verify "~:,,@" "A" "AA"
 
+[<Fact>]
 let ``popping empty stack produces zero``() =
     verify "1..@" "" "1 0 "
 
+[<Fact>]
 let ``not 1 is 0``() =
     verify "1!.@" "" "0 "
 
+[<Fact>]
 let ``not 2 is 0``() =
     verify "2!.@" "" "0 "
 
+[<Fact>]
 let ``not 0 is 1``() =
-    verify "1!.@" "" "1 "
+    verify "0!.@" "" "1 "
 
+[<Fact>]
 let ``can wrap around from first position`` () =
     verify "<@,~" "A" "A"
+
+[<Fact>]
+let ``optimized branch still pops`` ()  =
+    verifyOptimized "12v\n@._.@" "" "1 " 2
 
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
@@ -73,14 +103,23 @@ let sampleFiles file input output =
     verify (File.ReadAllText file) input output
 
 [<Theory>]
+// Hello worlds:
 [<InlineData("64+\"!dlroW ,olleH\">:#,_@", "", "Hello, World!\n")>]
+[<InlineData("<>>#;>:#,_@;\"Hello, world!\"", "", "Hello, world!")>]
+[<InlineData(";Hello, world!; >00ga6*1-->#@_1>:#<>#<0#<g#<:#<a#<6#<*#<1#<-#<-#<>#+>#1>#,_$$@", "", "Hello, world!")>]
+
+// cat:
 [<InlineData("~:1+!#@_,", "this is cat", "this is cat")>]
+
+// factorial: 
+// [<InlineData("5 :>>#;1-:48*+01p*01g48*-#;1#+-#1:#<_$.@", "", "120 ")>]
+// uses 'p', not supported
 let samplePrograms code input output = 
     verify code input output
 
 [<Theory>]
 [<InlineData("01->1# +# :# 0# g# ,# :# 5# 8# *# 4# +# -# _@")>]
-// [<InlineData("0v\n<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
+//[<InlineData("0v\n\"<@_ #! #: #,<*2-1*92,*25,+*92*4*55.0")>]
 // [<InlineData(":0g,:\"~\"`#@_1+0\"Quines are Fun\">_")>]
 // ^ inserts extraneous spaces
 let quine q = 
