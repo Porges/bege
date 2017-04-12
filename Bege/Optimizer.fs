@@ -101,7 +101,7 @@ let rec performStackAnalysis ip (insns, last) =
 
     // go : GlobalStack -> LocalStack -> Instruction list
     let rec go gs ls = function
-        | [] -> []
+        | [] -> (insns, last)
         | Load k :: is -> go gs (Some k :: ls) is
         | Push :: is ->
             match ls with
@@ -154,7 +154,7 @@ let rec performStackAnalysis ip (insns, last) =
 
     go (UnknownStack 0) [] insns
 
-let optimizeLast fs instructions last =
+let optimizeLast fs last instructions =
     let noInstructions = List.isEmpty instructions
 
     match last with
@@ -181,7 +181,11 @@ let optimizeLast fs instructions last =
 
     | c -> (instructions, c)
 
-let optimizeChain program ipState (insns, last) = optimizeLast ipState (fix (peepholeOptimize program) insns) last
+let optimizeChain program ipState (insns, last) = 
+    fix (peepholeOptimize program) insns
+    |> optimizeLast ipState last
+    |> performStackAnalysis ipState
+
 let optimizeChains program = Map.map (optimizeChain program)
 
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
