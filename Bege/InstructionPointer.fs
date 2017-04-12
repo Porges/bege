@@ -1,31 +1,36 @@
 ﻿module Bege.InstructionPointer
 
 /// Instruction pointer direction
-type Dir = Right = 0 | Up = 1 | Down = 2 | Left = 3
+type Delta = (struct (int * int))
+type Position = (struct (int * int))
 // (Important that Right is first so the initial instruction pointer
 //  sorts before others at the same position...)
 
-let reflect = function
-    | Dir.Right -> Dir.Left
-    | Dir.Up -> Dir.Down
-    | Dir.Left -> Dir.Right
-    | Dir.Down -> Dir.Up
+let reflect (struct (x, y)) = struct (-x, -y)
+
+module Dir =
+    let right = struct (0, 1)
+    let left = struct (0, -1)
+    let up = struct (-1, 0)
+    let down = struct (1, 0)
 
 /// Instruction pointer state
 [<StructuredFormatDisplay("{dir} {position}")>]
-type [<Struct>] IPState = { position : struct (int * int) ; dir : Dir }
+type [<Struct>] IPState = { position : Position; delta : Delta }
 
 /// Initial pointer state
-let programEntryState = { position = struct (0,0); dir = Dir.Right }
+let programEntryState = { position = struct (0,0); delta = Dir.right }
 
 let advance (ip : IPState) = 
     let struct (x, y) = ip.position
-    let (x', y') =
-        match ip.dir with
-        | Dir.Right -> (x, y+1)
-        | Dir.Left -> (x, y-1)
-        | Dir.Up -> (x-1, y)
-        | Dir.Down -> (x+1, y)
-    let x' = if x' < 0 then x' + 25 else x' % 25
-    let y' = if y' < 0 then y' + 80 else y' % 80
+    let struct (dx, dy) = ip.delta
+
+    let x' =
+        let x = x + dx in
+        if x < 0 then x + 25 else x % 25
+
+    let y' = 
+        let y = y + dy in
+        if y < 0 then y + 80 else y % 80
+
     { ip with position = struct (x', y') }

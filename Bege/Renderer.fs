@@ -80,7 +80,7 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
 
     let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.BefungeBase>)
 
-    let nameFromState { dir = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
+    let nameFromState { delta = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
 
     let definedMethods =
         let defineMethod fs chain = 

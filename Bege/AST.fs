@@ -63,16 +63,16 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             let go xs =
                 follow (List.append (List.rev xs) chain) (advance ip)
 
-            let branchChain(dir) =
-                let next = advance { ip with dir = dir }
+            let branchChain(delta) =
+                let next = advance { ip with delta = delta }
                 toVisit next
                 next
 
             let endChainWith c x = (List.rev (c :: chain), x)
             let endChain x = (List.rev chain, x)
 
-            let newChain dir = 
-                let next = advance { ip with dir = dir }
+            let newChain delta = 
+                let next = advance { ip with delta = delta }
                 toVisit next
                 endChain (ToState next)
 
@@ -83,10 +83,10 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
                 go [ Pop; UnOp o; Push ]
 
             match char (read ip.position) with
-            | '>' -> newChain Dir.Right
-            | '<' -> newChain Dir.Left
-            | '^' -> newChain Dir.Up
-            | 'v' -> newChain Dir.Down
+            | '>' -> newChain Dir.right
+            | '<' -> newChain Dir.left
+            | '^' -> newChain Dir.up
+            | 'v' -> newChain Dir.down
             | d when d >= '0' && d <= '9' -> go [Load (int(d) - int('0')); Push]
             | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go [Load (int(h) - int('a') + 10); Push]
             | '$' -> go [Pop; Discard]
@@ -101,13 +101,13 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             | '.' -> go [Pop; OutputNumber]
             | ',' -> go [Pop; OutputChar]
             | '!' -> unOp Not
-            | '?' -> endChain (Rand (List.sort [branchChain Dir.Left; branchChain Dir.Right; branchChain Dir.Up; branchChain Dir.Down]))
+            | '?' -> endChain (Rand (List.sort [branchChain Dir.left; branchChain Dir.right; branchChain Dir.up; branchChain Dir.down]))
             | '+' -> binOp Add
             | '-' -> binOp Subtract
             | '/' -> binOp Divide
             | '*' -> binOp Multiply
-            | '_' -> endChainWith Pop (Branch (branchChain Dir.Right, branchChain Dir.Left))
-            | '|' -> endChainWith Pop (Branch (branchChain Dir.Down, branchChain Dir.Up))
+            | '_' -> endChainWith Pop (Branch (branchChain Dir.right, branchChain Dir.left))
+            | '|' -> endChainWith Pop (Branch (branchChain Dir.down, branchChain Dir.up))
             | '`' -> binOp Greater
             | 'g' -> binOp ReadText
             | ';' -> checkYear 98 ';'; readComment chain (advance ip)
@@ -115,8 +115,9 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
                 if options.standard.year = 93
                 then raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
                 else 
-                    eprintf "Warning: unsupported instruction '%c', treating as if 'r'." c
-                    newChain (reflect ip.dir)
+                    if c <> 'r'
+                    then eprintf "Warning: unsupported instruction '%c', treating as if 'r'." c
+                    newChain (reflect ip.delta)
                  
         and readString acc (state : IPState) : (Instruction list * LastInstruction) =
             match char (read state.position) with
