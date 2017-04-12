@@ -2,7 +2,8 @@
 
 open Hedgehog
 open Xunit
-open Bege.Runtime
+
+open Bege.FungeSpace
 
 let genIndex = Gen.tuple Gen.int
 
@@ -12,7 +13,7 @@ let ``can read written value``() =
 
     Property.check <| property {
         let! (x, y) = genIndex
-        let! c = Gen.char
+        let! c = Gen.int
 
         fs.Item(x, y) <- c
 
@@ -30,7 +31,7 @@ let ``default value is space``() =
         let! (x, y) = genIndex
         let c = fs.Item(x, y)
 
-        Assert.Equal(' ', c)
+        Assert.Equal(int ' ', c)
     }
 
 [<Fact>]
@@ -39,12 +40,12 @@ let ``writing a second value does not affect the first``() =
 
     Property.check <| property {
         let! (x, y) = genIndex
-        let! c = Gen.char
+        let! c = Gen.int
         fs.Item(x, y) <- c
 
         let! (x', y') = genIndex
         where (x' <> x || y' <> y) // ensure no clashes
-        let! c' = Gen.char
+        let! c' = Gen.int
         fs.Item(x', y') <- c'
         
         let origC = fs.Item(x, y) 
@@ -55,12 +56,12 @@ let ``writing a second value does not affect the first``() =
 let ``can write a 256x256 block and read it back`` () =
     let fs = Funge98Space()
 
-    let charFor i j = char(i * 256 + j)
+    let value i j = i * 256 + j
 
     for i in 0..255 do
         for j in 0..255 do
-            fs.[i, j] <- charFor i j
+            fs.[i, j] <- value i j
 
     for i in 0..255 do
         for j in 0..255 do
-            Assert.Equal(charFor i j, fs.[i, j])
+            Assert.Equal(value i j, fs.[i, j])

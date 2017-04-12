@@ -25,15 +25,15 @@ let executeProgram befungeType =
     c.Run ()
 
 let run input (options : Options) : unit =
-    let prog =
+    let code =
         try
-            Bege.Parser.parse (File.ReadAllText input)
+            File.ReadAllText input
         with
         | :? FileNotFoundException as ex ->
             let msg = sprintf "File '%s' does not exist." input
             raise <| FatalException(msg, ExitCodes.InputNotFound, ex)
 
-    let compiled = Bege.Compiler.compile options prog
+    let compiled = Bege.Compiler.compile options code
 
     // if we didn't save an output file then execute it straight away:
     if options.outputFileName.IsNone

@@ -5,39 +5,11 @@ module Bege.AST
 
 open System.Text
 open Bege.Common
+open Bege.InstructionPointer
 open Bege.Options
 
-/// Sorts a tuple of 4 elements
-let sort4 (a, b, c, d) =
-    let [x; y; z; w] = List.sort [a; b; c; d]
-    (x, y, z, w)
-
-/// Instruction pointer direction
-type Dir = Right = 0 | Up = 1 | Down = 2 | Left = 3
-// (Important that Right is first so the initial instruction pointer
-//  sorts before others at the same position...)
-
-/// Instruction pointer state
-[<StructuredFormatDisplay("{dir} {position}")>]
-type [<Struct>] IPState = { position : struct (int * int) ; dir : Dir }
-
-/// Initial pointer state
-let programEntryState = { position = struct (0,0); dir = Dir.Right }
-
-let advance (ip : IPState) = 
-    let struct (x, y) = ip.position
-    let (x', y') =
-        match ip.dir with
-        | Dir.Right -> (x, y+1)
-        | Dir.Left -> (x, y-1)
-        | Dir.Up -> (x-1, y)
-        | Dir.Down -> (x+1, y)
-    let x' = if x' < 0 then x' + 25 else x' % 25
-    let y' = if y' < 0 then y' + 80 else y' % 80
-    { ip with position = struct (x', y') }
-
 type BinOp = 
-    | Add | Multiply | Divide | Subtract | Greater
+    | Add | Multiply | Divide | Subtract | Greater | ReadText
 
 type UnOp =
     | Not
@@ -51,7 +23,6 @@ type Instruction =
     | InputNumber
     | OutputChar
     | InputChar
-    | ReadText
     | BinOp of BinOp
     | UnOp of UnOp
 
@@ -59,7 +30,7 @@ type LastInstruction =
     | Exit
     | ToState of next : IPState
     | Branch of zero : IPState * nonZero : IPState
-    | Rand of IPState * IPState * IPState * IPState
+    | Rand of IPState list
 
 type Chain = Instruction list * LastInstruction
 type Program = Map<IPState, Instruction list * LastInstruction>
@@ -111,7 +82,7 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             let unOp o =
                 go [ Pop; UnOp o; Push ]
 
-            match read ip.position with
+            match char (read ip.position) with
             | '>' -> newChain Dir.Right
             | '<' -> newChain Dir.Left
             | '^' -> newChain Dir.Up
@@ -130,23 +101,29 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             | '.' -> go [Pop; OutputNumber]
             | ',' -> go [Pop; OutputChar]
             | '!' -> unOp Not
-            | '?' -> endChain (Rand (sort4 (branchChain Dir.Left, branchChain Dir.Right, branchChain Dir.Up, branchChain Dir.Down)))
+            | '?' -> endChain (Rand (List.sort [branchChain Dir.Left; branchChain Dir.Right; branchChain Dir.Up; branchChain Dir.Down]))
             | '+' -> binOp Add
             | '-' -> binOp Subtract
             | '/' -> binOp Divide
             | '*' -> binOp Multiply
             | '_' -> endChainWith Pop (Branch (branchChain Dir.Right, branchChain Dir.Left))
-            | '|' -> endChainWith Pop (Branch (branchChain Dir.Up, branchChain Dir.Down))
+            | '|' -> endChainWith Pop (Branch (branchChain Dir.Down, branchChain Dir.Up))
             | '`' -> binOp Greater
-            | 'g' -> go [Pop; Pop; ReadText; Push]
+            | 'g' -> binOp ReadText
             | ';' -> checkYear 98 ';'; readComment chain (advance ip)
-            | c -> raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
+            | c -> 
+                if options.standard.year = 93
+                then raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
+                else 
+                    eprintf "Warning: unsupported instruction '%c', treating as if 'r'." c
+                    newChain (reflect ip.dir)
+                 
         and readString acc (state : IPState) : (Instruction list * LastInstruction) =
-            match read state.position with
+            match char (read state.position) with
             | '"' -> follow acc (advance state)
             | c -> readString (Push :: Load (int c) :: acc) (advance state)
         and readComment chain (state : IPState) =
-            match read state.position with
+            match char (read state.position) with
             | ';' -> follow chain (advance state)
             | c -> readComment chain (advance state)
         

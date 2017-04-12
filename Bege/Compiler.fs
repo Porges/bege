@@ -11,15 +11,11 @@ open System
 open System.IO
 open System.Text
 
-let toText (prog : Parser.Program) : string =
-    let sb = StringBuilder(Array2D.length1 prog * Array2D.length2 prog)
-    prog |> Array2D.iter (fun c -> sb.Append c |> ignore)
-    sb.ToString()
-
-let compile (options : Options) (prog : Parser.Program) : Type =
+let compile (options : Options) (text : string) : Type =
+    let prog = Parser.parse text
     computeChains prog options
-    |> (fun p -> if options.optimize then optimize p else p)
-    |> buildType options.outputFileName (toText prog)
+    |> (fun p -> if options.optimize then optimize prog p else p)
+    |> buildType options.outputFileName text
 
 let run prog (seed : uint64) (input : TextReader) (output : TextWriter) options =
     let compiled = compile prog options

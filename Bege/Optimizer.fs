@@ -2,8 +2,9 @@
 
 open System
 
-open Bege.Common
 open Bege.AST
+open Bege.Common
+open Bege.InstructionPointer
 
 let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
 
@@ -17,7 +18,7 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
                 match li with
                 | Exit -> cs
                 | Branch (l, r) -> inc l (inc r cs)
-                | Rand (a, b, c, d) -> inc a (inc b (inc c (inc d cs)))
+                | Rand targets -> List.fold (fun cs x -> inc x cs) cs targets
                 | ToState n -> inc n cs) Map.empty
      
     let counts = countReferences m
@@ -46,24 +47,21 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
                 let l = if isJump l then target l else l
                 let r = if isJump r then target r else r
                 (il, Branch (l, r))
-            | Rand (a, b, c, d)
-                when isJump a || isJump b || isJump c || isJump d ->
-                let a = if isJump a then target a else a
-                let b = if isJump b then target b else b
-                let c = if isJump c then target c else c
-                let d = if isJump d then target d else d
-                (il, Rand (sort4 (a, b, c, d)))
+            | Rand targets
+                when List.exists isJump targets ->
+                let newTargets = List.map (fun x -> if isJump x then target x else x) targets
+                (il, Rand newTargets)
             | _ ->  value)
 
     let newCounts = countReferences result
 
     result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState (* can't remove entry state *))
 
-let rec peepholeOptimize = function
+let rec peepholeOptimize (prog : Parser.Program) = function
     // Unneeded push/pops
-    | Push :: Pop :: is -> peepholeOptimize is
-    | Dup :: Pop :: is -> peepholeOptimize is
-    | Load _ :: Discard :: is -> peepholeOptimize is
+    | Push :: Pop :: is -> peepholeOptimize prog is
+    | Dup :: Pop :: is -> peepholeOptimize prog is
+    | Load _ :: Discard :: is -> peepholeOptimize prog is
     // constant folding
     | Load b :: Push :: Load a :: Pop :: BinOp k :: is ->
         let apply a b =
@@ -73,7 +71,9 @@ let rec peepholeOptimize = function
             | Multiply -> b * a
             | Divide -> b / a
             | Greater -> if b > a then 1 else 0
-        peepholeOptimize (Load (apply a b) :: is)
+            | ReadText -> prog.[a, b]
+
+        peepholeOptimize prog (Load (apply a b) :: is)
     //| Push x :: Push y :: Add :: is -> peepholeOptimize (Push (x + y) :: is)
     //| Push x :: Push y :: Divide :: is -> peepholeOptimize (Push (x / y) :: is)
     //| Push x :: Push y :: Multiply :: is -> peepholeOptimize (Push (x * y) :: is)
@@ -81,42 +81,108 @@ let rec peepholeOptimize = function
     //| Push x :: Push y :: Greater :: is -> peepholeOptimize (Push (Convert.ToInt32(x > y)) :: is)
     //| Push x :: Not :: is -> peepholeOptimize (Push (Convert.ToInt32((x = 0))) :: is)
     // eliminate unneeded nots
-    | UnOp Not :: UnOp Not :: is -> peepholeOptimize is
+    | UnOp Not :: UnOp Not :: is -> peepholeOptimize prog is
     // eliminate unneeded flips
     //| Push :: Push :: Pop :: Pop :: Flip :: is -> peepholeOptimize (Push y :: Push x :: is)
-    | Flip :: Flip :: is -> peepholeOptimize is
-    | Dup :: Flip :: is -> Dup :: peepholeOptimize is
+    | Flip :: Flip :: is -> peepholeOptimize prog is
+    | Dup :: Flip :: is -> Dup :: peepholeOptimize prog is
     // eliminate dead pushes
-    | (i :: is) -> i :: peepholeOptimize is
+    | (i :: is) -> i :: peepholeOptimize prog is
     | [] -> []
+
+type Stack
+    = UnknownStack of int // how many values have we popped from this
+    | EmptyStack
+    | Value of int option * Stack
+
+type LocalStack = int option list
+
+let rec performStackAnalysis ip (insns, last) = 
+
+    // go : GlobalStack -> LocalStack -> Instruction list
+    let rec go gs ls = function
+        | [] -> []
+        | Load k :: is -> go gs (Some k :: ls) is
+        | Push :: is ->
+            match ls with
+            | (l :: ls) -> go (Value (l, gs)) ls is
+            | [] -> failwith "Pushed from empty local stack"
+        | Pop :: is ->
+            match gs with
+            | EmptyStack -> go EmptyStack (Some 0 :: ls) is
+            | UnknownStack pops -> go (UnknownStack (pops+1)) (None :: ls) is
+            | Value (v, rest) -> go rest (v :: ls) is
+        | Discard :: is | OutputChar :: is | OutputNumber :: is ->
+            match ls with
+            | (_ :: ls) -> go gs ls is
+            | [] -> failwith "Unexpected empty stack"
+        | BinOp op :: is ->
+            match ls with
+            | (Some a :: Some b :: ls) -> 
+                let result = 
+                    match op with
+                    | Multiply -> b * a
+                    | Add -> b + a
+                    | Subtract -> b - a
+                    | Divide -> b / a
+                    | Greater -> if b > a then 1 else 0
+                go gs (Some result :: ls) is
+            | _ :: _ :: ls -> go gs (None :: ls) is // unknown result
+            | _ -> failwith "Binary operation without enough arguments on stack"
+        | UnOp op :: is ->
+            match ls with
+            | Some a :: ls ->
+                let result =
+                    match op with
+                    | Not -> if a = 0 then 1 else 0
+                
+                go gs (Some result :: ls) is
+
+            | _ :: ls -> go gs (None :: ls) is // unknown result
+            | _ -> failwith "Unary operation without enough arguments on stack"
+
+        | Dup :: is ->
+            match ls with
+            | (v :: _) -> go gs (v :: ls) is
+            | [] -> failwith "Dup with empty stack"
+        | Flip :: is ->
+            match ls with
+            | (x :: y :: ls) -> go gs (y :: x :: ls) is
+            | _ -> failwith "Flip without enough arguments on stack"
+        | InputChar :: is -> go gs (None :: ls) is
+        | InputNumber :: is -> go gs (None :: ls) is
+
+    go (UnknownStack 0) [] insns
 
 let optimizeLast fs instructions last =
     let noInstructions = List.isEmpty instructions
 
     match last with
     // identical branches - change to unconditional jump
+    // we must add Discard to get rid of the existing Pop
     | Branch (l, r) when l = r -> (List.append instructions [Discard], ToState r)
 
+    // TODO: update these patterns to deal with N cases
     // Rand with all identical:
-    | Rand (a, b, c, d) when a = b && b = c && c = d -> (instructions, ToState d)
+    | Rand [a; b; c; d] when a = b && b = c && c = d -> (instructions, ToState d)
 
     // Rand that loops back to same function must eventually branch to another,
     // so if there are no instructions in this function we could just jump instead.
     //
     // There are two orders to check here - since Rand is always ordered (via ord4),
     // either fs < all or fs > all:
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = c && c = d -> (instructions, ToState d)
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = d -> (instructions, ToState d)
-    | Rand (a, b, c, d) when noInstructions && a = fs && b = fs && c = fs -> (instructions, ToState d)
+    | Rand [a; b; c; d] when noInstructions && a = fs && b = c && c = d -> (instructions, ToState d)
+    | Rand [a; b; c; d] when noInstructions && a = fs && b = fs && c = d -> (instructions, ToState d)
+    | Rand [a; b; c; d] when noInstructions && a = fs && b = fs && c = fs -> (instructions, ToState d)
 
-    | Rand (a, b, c, d) when noInstructions && a = b && b = c && d = fs -> (instructions, ToState a)
-    | Rand (a, b, c, d) when noInstructions && a = b && c = fs && d = fs -> (instructions, ToState a)
-    | Rand (a, b, c, d) when noInstructions && b = fs && c = fs && d = fs -> (instructions, ToState a)
+    | Rand [a; b; c; d] when noInstructions && a = b && b = c && d = fs -> (instructions, ToState a)
+    | Rand [a; b; c; d] when noInstructions && a = b && c = fs && d = fs -> (instructions, ToState a)
+    | Rand [a; b; c; d] when noInstructions && b = fs && c = fs && d = fs -> (instructions, ToState a)
 
     | c -> (instructions, c)
 
-let optimizeChain ipState (insns, last) = optimizeLast ipState (fix peepholeOptimize insns) last
-let optimizeChains = Map.map optimizeChain 
+let optimizeChain program ipState (insns, last) = optimizeLast ipState (fix (peepholeOptimize program) insns) last
+let optimizeChains program = Map.map (optimizeChain program)
 
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
 
@@ -137,12 +203,12 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
             match last with
             | Exit -> Exit
             | Branch (one, two) -> Branch (newMappings.[one], newMappings.[two])
-            | Rand (a, b, c, d) -> Rand (sort4 (newMappings.[a], newMappings.[b], newMappings.[c], newMappings.[d]))
+            | Rand targets -> Rand (List.sort (List.map (fun x -> newMappings.[x]) targets))
             | ToState n -> ToState (newMappings.[n])
         (List.min fss, (is, newLast)))
     |> Map.ofSeq
 
-let optimize (chains : Map<IPState, Instruction list * LastInstruction>)
+let optimize (program : Parser.Program) (chains : Map<IPState, Instruction list * LastInstruction>)
     : Map<IPState, Instruction list * LastInstruction> = 
 
-    fix (optimizeChains << inlineChains << collapseIdenticalChains) chains
+    fix (optimizeChains program << inlineChains << collapseIdenticalChains) chains

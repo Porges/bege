@@ -3,7 +3,7 @@
 open System
 open System.IO
 
-open Common
+open Bege.FungeSpace
 
 let private lines s =
     seq {
@@ -13,15 +13,15 @@ let private lines s =
             yield line
     }
     
-// A program is an 80x25 array of characters:
-type Program = char[,]
-
-let private emptyLine = String(' ', 80).ToCharArray()
-let private padding = Seq.initInfinite (always emptyLine)
+// TODO: Enforce 80x25 restriction on Befunge93?
+type Program = Funge98Space
 
 let parse p : Program =
-    lines p
-    |> Seq.map (fun l -> l.PadRight(80).ToCharArray())
-    |> flip Seq.append padding
-    |> Seq.take 25
-    |> array2D
+    Seq.zip (lines p) (Seq.initInfinite (fun x -> x))
+    |> Seq.fold
+        (fun program (line, x) -> 
+            for y in 0..line.Length-1 do
+                program.[x,y] <- int line.[y]
+            program)
+        (Program())
+    

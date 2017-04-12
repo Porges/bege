@@ -74,7 +74,9 @@
     <Compile Include="Common.fs" />
     <Compile Include="LCG.fs" />
     <Compile Include="Options.fs" />
+    <Compile Include="FungeSpace.fs" />
     <Compile Include="Parser.fs" />
+    <Compile Include="InstructionPointer.fs" />
     <Compile Include="Runtime.fs" />
     <Compile Include="AST.fs" />
     <Compile Include="Optimizer.fs" />

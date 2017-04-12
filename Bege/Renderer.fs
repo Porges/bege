@@ -6,6 +6,7 @@ open System.Reflection
 open System.Reflection.Emit
 
 open Bege.AST
+open Bege.InstructionPointer
 open Bege.Runtime
 
 let assemblyName = AssemblyName "BefungeAssembly"
@@ -68,7 +69,9 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
 
     let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
 
-    let dynMod = dynAsm.DefineDynamicModule(moduleName, Option.defaultValue "temp.dll" fileName)
+    let moduleFile = Path.GetFileName <| Option.defaultValue "temp.dll" fileName
+
+    let dynMod = dynAsm.DefineDynamicModule(moduleName, moduleFile)
     let typeAttributes = 
         TypeAttributes.Public |||
         TypeAttributes.Class |||
@@ -135,22 +138,27 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
             | InputNumber -> callBase BaseMethods.inputNumber
             | OutputChar -> callBase BaseMethods.outputChar
             | OutputNumber -> callBase BaseMethods.outputNumber
+            | BinOp Greater ->
+                // we use "less than" rather than flipping and
+                // calling greater than
+                il.Emit(OpCodes.Clt)
             | BinOp Add -> il.Emit(OpCodes.Add)
             | BinOp Multiply -> il.Emit(OpCodes.Mul)
+            | UnOp Not ->
+                il.Emit(OpCodes.Ldc_I4_0)
+                il.Emit(OpCodes.Ceq)
             | BinOp Divide ->
                 emitFlip()
                 il.Emit(OpCodes.Div)
             | BinOp Subtract -> 
                 emitFlip()
                 il.Emit(OpCodes.Sub)
-            | ReadText ->
+            | BinOp ReadText ->
                 emitFlip()
                 callBase BaseMethods.readText
-            | BinOp Greater -> callBaseStatic BaseMethods.greater
-            | UnOp Not -> callBaseStatic BaseMethods.not
 
         let emitLast = function
-            | Rand (a, b, c, d) ->
+            | Rand [a; b; c; d] ->
                 let (a, _) = definedMethods.[a]
                 let (b, _) = definedMethods.[b]
                 let (c, _) = definedMethods.[c]
@@ -193,7 +201,17 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
     let result = tb.CreateType()
 
     // if filename is given, define Main and save the assembly
-    fileName |> Option.iter (fun fn -> dynAsm.SetEntryPoint (defineMain dynMod result); dynAsm.Save fn) 
+    fileName
+    |> Option.iter (fun fn ->
+        dynAsm.SetEntryPoint (defineMain dynMod result)
+        let f = Path.GetFileName fn
+        let d = Path.GetDirectoryName fn
+        if not (String.IsNullOrEmpty d)
+        then Directory.CreateDirectory(d) |> ignore
+        dynAsm.Save(f)
+        if f <> fn
+        then File.Delete(fn)
+        File.Move(f, fn)) 
 
     result
 

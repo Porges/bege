@@ -60,8 +60,62 @@
     <Compile Include="Tests.fs" />
     <Compile Include="FungeSpaceTests.fs" />
     <Content Include="packages.config" />
+    <Compile Include="Approvals.fs" />
+    <None Include="Mycology\sanity.bf">
+      <Link>sanity.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Mycology\mycology.b98">
+      <Link>mycology.b98</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\beer.bf">
+      <Link>beer.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\befunge1.bf">
+      <Link>befunge1.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\befunge2.bf">
+      <Link>befunge2.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\befunge3.bf">
+      <Link>befunge3.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\befunge4.bf">
+      <Link>befunge4.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\befungex.bf">
+      <Link>befungex.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\hello.bf">
+      <Link>hello.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\pi.bf">
+      <Link>pi.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Befunge-93\eg\pi2.bf">
+      <Link>pi2.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="ApprovalTests">
+      <HintPath>..\packages\ApprovalTests.3.0.13\lib\net40\ApprovalTests.dll</HintPath>
+    </Reference>
+    <Reference Include="ApprovalUtilities">
+      <HintPath>..\packages\ApprovalUtilities.3.0.13\lib\net45\ApprovalUtilities.dll</HintPath>
+    </Reference>
+    <Reference Include="ApprovalUtilities.Net45">
+      <HintPath>..\packages\ApprovalUtilities.3.0.13\lib\net45\ApprovalUtilities.Net45.dll</HintPath>
+    </Reference>
     <Reference Include="FSharp.Core">
       <HintPath>..\packages\FSharp.Core.4.1.2\lib\net45\FSharp.Core.dll</HintPath>
     </Reference>

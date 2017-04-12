@@ -17,8 +17,7 @@ let private verify code input output =
 
         use inS = new StringReader(input)
         use outS = new StringWriter()
-        let program = Bege.Parser.parse code
-        let count = run options 0UL inS outS program
+        let count = run options 0UL inS outS code
 
         Assert.Equal(output, outS.ToString())
 
@@ -32,8 +31,7 @@ let private verifyOptimized code input output expectedInsns =
 
     use inS = new StringReader(input)
     use outS = new StringWriter()
-    let program = Bege.Parser.parse code
-    let count = run options 0UL inS outS program
+    let count = run options 0UL inS outS code
 
     Assert.Equal(output, outS.ToString()) 
     Assert.Equal(expectedInsns, count)
