@@ -32,8 +32,9 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
         | _ -> false
     
     let target fs = 
-        match m.[fs] with // must be guarded by `isJump`
+        match m.[fs] with 
         | ([], ToState t) -> t
+        | _ -> failwith "target must be guarded by isJump"
 
     let result =
         m
@@ -70,6 +71,7 @@ let rec peepholeOptimize (prog : Parser.Program) = function
             | Subtract -> b - a
             | Multiply -> b * a
             | Divide -> b / a
+            | Modulo -> b % a
             | Greater -> if b > a then 1 else 0
             | ReadText -> prog.[a, b]
 
@@ -125,6 +127,7 @@ let rec performStackAnalysis ip (insns, last) =
                     | Add -> b + a
                     | Subtract -> b - a
                     | Divide -> b / a
+                    | Modulo -> b % a
                     | Greater -> if b > a then 1 else 0
                 go gs (Some result :: ls) is
             | _ :: _ :: ls -> go gs (None :: ls) is // unknown result

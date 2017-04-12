@@ -150,6 +150,9 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
             | BinOp Divide ->
                 emitFlip()
                 il.Emit(OpCodes.Div)
+            | BinOp Modulo ->
+                emitFlip()
+                il.Emit(OpCodes.Rem)
             | BinOp Subtract -> 
                 emitFlip()
                 il.Emit(OpCodes.Sub)

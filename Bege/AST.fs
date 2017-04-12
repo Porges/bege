@@ -9,7 +9,7 @@ open Bege.InstructionPointer
 open Bege.Options
 
 type BinOp = 
-    | Add | Multiply | Divide | Subtract | Greater | ReadText
+    | Add | Multiply | Divide | Subtract | Greater | ReadText | Modulo
 
 type UnOp =
     | Not
@@ -105,6 +105,7 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             | '+' -> binOp Add
             | '-' -> binOp Subtract
             | '/' -> binOp Divide
+            | '%' -> binOp Modulo
             | '*' -> binOp Multiply
             | '_' -> endChainWith Pop (Branch (branchChain Dir.right, branchChain Dir.left))
             | '|' -> endChainWith Pop (Branch (branchChain Dir.down, branchChain Dir.up))

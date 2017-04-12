@@ -113,6 +113,11 @@ let ``98 string mode collapses multiple spaces`` () =
 let ``93 string mode preserves multiple spaces`` () =
     verifyMode 93 "\"z  a\",,,,@" "" "a  z"
 
+[<Fact>]
+let ``modulo works as expected`` () =
+    verify "95%.@" "" "4 "
+    verify "59%.@" "" "5 "
+
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
 [<InlineData("samples-factorial.bf", "2 ", "2 ")>]

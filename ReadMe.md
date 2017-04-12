@@ -35,7 +35,7 @@ All of Befunge-93 is supported except `p`.
 | add `+` | ○ |
 | multiply `*` | ○ |
 | divide `/` | ○ |
-| modulo `%` | × |
+| modulo `%` | ○ |
 | subtract `-` | ○ |
 | greater <code>`</code> | ○ |
 | compare `w` | × (98) |
