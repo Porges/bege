@@ -21,6 +21,21 @@ let private verify code input output =
 
         Assert.Equal(output, outS.ToString())
 
+let private verifyMode year code input output =
+
+    for optimize in [false; true] do
+        let options =
+            { outputFileName = None
+            ; optimize = optimize
+            ; standard = { befunge98 with year = year }
+            }
+
+        use inS = new StringReader(input)
+        use outS = new StringWriter()
+        let count = run options 0UL inS outS code
+
+        Assert.Equal(output, outS.ToString())
+
 let private verifyOptimized code input output expectedInsns =
 
     let options =
@@ -89,6 +104,14 @@ let ``can wrap around from first position`` () =
 [<Fact>]
 let ``optimized branch still pops`` ()  =
     verifyOptimized "12v\n@._.@" "" "1 " 1
+
+[<Fact>]
+let ``98 string mode collapses multiple spaces`` () =
+    verifyMode 98 "\"z  a\",,,@" "" "a z"
+
+[<Fact>]
+let ``93 string mode preserves multiple spaces`` () =
+    verifyMode 93 "\"z  a\",,,,@" "" "a  z"
 
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]

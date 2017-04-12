@@ -48,7 +48,7 @@ All of Befunge-93 is supported except `p`.
 | store `s` | × (98) |
 | input file `i` | × (98) |
 | output file `o` | × (98) |
-| string mode `"` | ○ (98 space collapsing not supported) |
+| string mode `"` | ○ |
 | comment mode `;` | ○ (98) |
 | eval `=` | × (98) | 
 | jump `j` | × (98) |

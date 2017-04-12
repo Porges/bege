@@ -122,7 +122,12 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
         and readString acc (state : IPState) : (Instruction list * LastInstruction) =
             match char (read state.position) with
             | '"' -> follow acc (advance state)
+            | ' ' when options.standard.year = 98 ->
+                match acc with
+                | Push :: Load 32 :: _ -> readString acc (advance state)
+                | _ -> readString (Push :: Load 32 :: acc) (advance state)
             | c -> readString (Push :: Load (int c) :: acc) (advance state)
+
         and readComment chain (state : IPState) =
             match char (read state.position) with
             | ';' -> follow chain (advance state)
