@@ -79,9 +79,20 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
         x.AddCount()
         fprintf x.Writer "%d " v
 
+        (*
     member x.Interpret(dir, row, column) : unit =
-        let ip = { dir = dir; position = struct (row, column) }
-        ()
+        let rec go dir row col =
+            let advance ip row col =
+                go ip row col
+
+            match char(fungeSpace.[ip.row, ip.column]) with
+            | 'r' -> advance (reflect dir) row col
+            | 'v' -> advance Dir.up row col
+            | 'p' -> 
+
+        go dir row col
+        *)
+
 
 module BaseMethods = 
     let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Static ||| BindingFlags.Public)

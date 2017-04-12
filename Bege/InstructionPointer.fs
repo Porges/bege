@@ -4,7 +4,7 @@
 type Delta = (struct (int * int))
 type Position = (struct (int * int))
 // (Important that Right is first so the initial instruction pointer
-//  sorts before others at the same position...)
+//  sorts before others at the same position...) - TODO: fix this again
 
 let reflect (struct (x, y)) = struct (-x, -y)
 
