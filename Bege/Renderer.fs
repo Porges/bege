@@ -131,8 +131,8 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
             | Push -> callBase BaseMethods.push
             | Pop -> callBase BaseMethods.pop
             | Discard -> il.Emit(OpCodes.Pop)
-            | Flip ->
-                emitFlip()
+            | Clear -> callBase BaseMethods.clear
+            | Flip -> emitFlip()
             | Dup -> il.Emit(OpCodes.Dup)
             | InputChar -> callBase BaseMethods.inputChar
             | InputNumber -> callBase BaseMethods.inputNumber

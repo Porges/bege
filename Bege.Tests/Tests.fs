@@ -118,6 +118,10 @@ let ``modulo works as expected`` () =
     verify "95%.@" "" "4 "
     verify "59%.@" "" "5 "
 
+[<Fact>]
+let ``clear clears whole stack`` () =
+    verify "321n...@"  "" "0 0 0 "
+
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1 ", "1 ")>]
 [<InlineData("samples-factorial.bf", "2 ", "2 ")>]

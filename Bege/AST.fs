@@ -17,7 +17,7 @@ type UnOp =
 type Instruction = 
     | Load of int
     | Push | Pop
-    | Discard
+    | Discard | Clear
     | Dup | Flip
     | OutputNumber
     | InputNumber
@@ -112,6 +112,7 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
             | '`' -> binOp Greater
             | 'g' -> binOp ReadText
             | ';' -> checkYear 98 ';'; readComment chain (advance ip)
+            | 'n' -> checkYear 98 'n'; go [Clear]
             | c -> 
                 if options.standard.year = 93
                 then raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)

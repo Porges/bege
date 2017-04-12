@@ -47,6 +47,10 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
         x.AddCount()
         if stack.Count > 0 then stack.Pop() else 0
 
+    member x.Clear() =
+        x.AddCount()
+        stack.Clear()
+
     static member Push (value : int32, x : BefungeBase) : unit =
         x.AddCount()
         x.Stack.Push value
@@ -96,8 +100,9 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
 
 module BaseMethods = 
     let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Static ||| BindingFlags.Public)
-    let pop = m "Pop"
     let push = m "Push"
+    let pop = m "Pop"
+    let clear = m "Clear"
     let outputChar = m "OutputChar"
     let inputChar = m "InputChar"
     let inputNumber = m "InputNumber"

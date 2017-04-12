@@ -26,7 +26,7 @@ All of Befunge-93 is supported except `p`.
 | exit `@` | ○ |
 | duplicate `:` | ○ |
 | swap `\\` | ○ |
-| clear `n` | × (98) |
+| clear `n` | ○ (98) |
 | input character `~` | ○ |
 | output character `,` | ○ |
 | input number `&` | ○ |

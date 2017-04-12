@@ -99,7 +99,7 @@ type Stack
 
 type LocalStack = int option list
 
-let rec performStackAnalysis ip (insns, last) = 
+let rec performStackAnalysis (program : Parser.Program) ip (insns, last) = 
 
     // go : GlobalStack -> LocalStack -> Instruction list
     let rec go gs ls = function
@@ -118,6 +118,10 @@ let rec performStackAnalysis ip (insns, last) =
             match ls with
             | (_ :: ls) -> go gs ls is
             | [] -> failwith "Unexpected empty stack"
+        | Clear :: is ->
+            match ls with
+            | [] -> go EmptyStack ls is
+            | _ -> failwith "Clear with unclear local stack"
         | BinOp op :: is ->
             match ls with
             | (Some a :: Some b :: ls) -> 
@@ -128,6 +132,7 @@ let rec performStackAnalysis ip (insns, last) =
                     | Subtract -> b - a
                     | Divide -> b / a
                     | Modulo -> b % a
+                    | ReadText -> program.[a, b]
                     | Greater -> if b > a then 1 else 0
                 go gs (Some result :: ls) is
             | _ :: _ :: ls -> go gs (None :: ls) is // unknown result
@@ -187,7 +192,7 @@ let optimizeLast fs last instructions =
 let optimizeChain program ipState (insns, last) = 
     fix (peepholeOptimize program) insns
     |> optimizeLast ipState last
-    |> performStackAnalysis ipState
+    |> performStackAnalysis program ipState
 
 let optimizeChains program = Map.map (optimizeChain program)
 
