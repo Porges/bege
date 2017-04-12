@@ -37,10 +37,10 @@ All of Befunge-93 is supported except `p`.
 | divide `/` | ○ |
 | modulo `%` | × |
 | subtract `-` | ○ |
-| greater `\`` | ○ |
+| greater <code>`</code> | ○ |
 | compare `w` | × (98) |
 | branch l/r `_` | ○ |
-| branch u/d `|` | ○ |
+| branch u/d <code>&#124;</code> | ○ |
 | branch h/d `m` | × (tre/98) |
 | random `?` | ○ |
 | get `g` | ○ |
