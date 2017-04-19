@@ -22,8 +22,7 @@ type Stack
     | Value of StackValue * Stack
 
 /// How many items the chain pops, and how many it stores.
-type StackBehaviour =
-    StackBehaviour of int * int
+type StackBehaviour = int * int
 
 type LocalStack = StackValue list
 
@@ -154,30 +153,39 @@ and eventualFateG st = function
     | Clear :: is -> Discarded
     | _ :: is -> eventualFateG st is
     
-let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, last) = 
+let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : StateId) ((insns, last) : Chain<StateId>) : (StackBehaviour * Chain<StateId>) = 
 
     // acc = instruction acculuator
     // gs = global stack
     // ls = local stack
     let rec go acc gs ls = function
         | [] ->
-            match gs with
-            | EmptyStack ->
-                // we know it's empty so we can propagate that information
-                // to the next chain.
-                (List.rev acc, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
+            let rec finale wrote = function
+                | Value (v, rest) -> finale (wrote+1) rest
 
-            | _ ->
+                | EmptyStack ->
+                    let chain =
+                        if wrote = 0
+                        // we know it's empty so we can propagate that information
+                        // to the next chain.
+                        then (List.rev acc, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
+                        else (List.rev acc, last)
+                    
+                    ((0, wrote), chain)
 
-                match last with
-                | Branch _ ->
-                    if List.length ls <> 1
-                    then failwith "Branch without push before it"
-                | _ ->
-                    if not (List.isEmpty ls)
-                    then failwith "Function ended with non-empty local stack"
+                | UnknownStack read ->
 
-                (List.rev acc, last)
+                    match last with
+                    | Branch _ ->
+                        if List.length ls <> 1
+                        then failwith "Branch without push before it"
+                    | _ ->
+                        if not (List.isEmpty ls)
+                        then failwith "Function ended with non-empty local stack"
+
+                    ((read, wrote), (List.rev acc, last))
+             
+            finale 0 gs
 
         | Load k :: is ->
             match eventualFateLocal 0 is with
@@ -311,6 +319,7 @@ let optimizeChain program stateId (insns, last) =
     fix (peepholeOptimize program) insns
     |> optimizeLast stateId last
     |> performStackAnalysis program stateId
+    |> snd
 
 let optimizeChains programText program  =
     let newProgram = Map.map (optimizeChain programText) program
