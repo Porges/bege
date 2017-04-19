@@ -33,7 +33,7 @@ let compile (options : Options) (text : string) : Type =
     let prog = Parser.parse text
     computeChains prog options
     |> optimizeAndMapToCommonType options prog
-    |> buildType options.outputFileName text
+    |> buildType options text
 
 let run prog (seed : uint64) (input : TextReader) (output : TextWriter) options =
     let compiled = compile prog options

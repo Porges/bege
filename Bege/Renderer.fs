@@ -6,8 +6,9 @@ open System.Reflection
 open System.Reflection.Emit
 
 open Bege.AST
-open Bege.Runtime
 open Bege.Optimizer
+open Bege.Options
+open Bege.Runtime
 
 let assemblyName = AssemblyName "BefungeAssembly"
 let moduleName = "BefungeModule"
@@ -24,7 +25,7 @@ let defineRunMethod (tb : TypeBuilder) (initialFunction : string) (definedMethod
     runIL.Emit(OpCodes.Ret)
 
 let defineConstructor (tb : TypeBuilder) (progText : string) : unit =
-    let ctor = 
+    let ctor =
         tb.DefineMethod(
             ".ctor",
             MethodAttributes.Public ||| MethodAttributes.SpecialName,
@@ -40,7 +41,7 @@ let defineConstructor (tb : TypeBuilder) (progText : string) : unit =
     il.Emit(OpCodes.Call, BaseMethods.ctor)
     il.Emit(OpCodes.Ret)
 
-    let emptyCtor = 
+    let emptyCtor =
         tb.DefineMethod(".ctor", MethodAttributes.Public ||| MethodAttributes.SpecialName)
 
     let emptyIL = emptyCtor.GetILGenerator()
@@ -65,14 +66,25 @@ let defineMain (dynMod : ModuleBuilder) (programType : Type) : MethodInfo =
     entryPoint.CreateType() |> ignore
     entryPoint.GetMethod("Main")
 
-let buildType (fileName : string option) (progText : string) (chains : Map<string, TypedChain<string>>, initialFunction : string) : Type =
+let saveRunnableAssembly (dynAsm : AssemblyBuilder) dynMod resultType path =
+    dynAsm.SetEntryPoint (defineMain dynMod resultType)
+    let fileName = Path.GetFileName path
+    let dir = Path.GetDirectoryName path
+    if not (String.IsNullOrEmpty dir) then Directory.CreateDirectory(dir) |> ignore
+    // AssemblyBuilder won't save directly to a path..
+    dynAsm.Save(fileName)
+    if fileName <> path
+    then File.Delete(path)
+    File.Move(fileName, path)
+
+let buildType (options : Options) (progText : string) (chains : Map<string, TypedChain<string>>, initialFunction : string) : Type =
 
     let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
 
-    let moduleFile = Path.GetFileName <| Option.defaultValue "temp.dll" fileName
+    let moduleFile = Path.GetFileName <| Option.defaultValue "temp.dll" options.outputFileName
 
     let dynMod = dynAsm.DefineDynamicModule(moduleName, moduleFile)
-    let typeAttributes = 
+    let typeAttributes =
         TypeAttributes.Public |||
         TypeAttributes.Class |||
         TypeAttributes.Sealed |||
@@ -81,11 +93,12 @@ let buildType (fileName : string option) (progText : string) (chains : Map<strin
     let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.BefungeBase>)
 
     let definedMethods =
-        let defineMethod fs chain = 
-            // printfn "Defining %s" (nameFromState fs)
-            let method = tb.DefineMethod(fs, MethodAttributes.Private) in
-            (method, chain) in
-        chains |> Map.map defineMethod
+        chains |> Map.map (fun name chain ->
+            let args = fst chain.stackBehaviour
+            if options.verbose then printfn "Defining %s (%d args)" name args
+            let args = Array.replicate 0 (* TODO: args *) typeof<int>
+            let method = tb.DefineMethod(name, MethodAttributes.Private, typeof<Void>, args)
+            (method, chain))
 
     let buildMethod fs (method : MethodBuilder, c) =
         // printfn "Emitting method: %s" (nameFromState fs)
@@ -99,7 +112,7 @@ let buildType (fileName : string option) (progText : string) (chains : Map<strin
 
         let callBaseStatic (mi : MethodInfo) =
             il.Emit(OpCodes.Call, mi)
-        
+
         let tailTo (mi : MethodInfo) =
             il.Emit(OpCodes.Ldarg_0)
             il.Emit(OpCodes.Tailcall)
@@ -151,7 +164,7 @@ let buildType (fileName : string option) (progText : string) (chains : Map<strin
             | BinOp Modulo ->
                 emitFlip()
                 il.Emit(OpCodes.Rem)
-            | BinOp Subtract -> 
+            | BinOp Subtract ->
                 emitFlip()
                 il.Emit(OpCodes.Sub)
             | BinOp ReadText ->
@@ -187,10 +200,10 @@ let buildType (fileName : string option) (progText : string) (chains : Map<strin
                 il.MarkLabel(zeroTarget)
                 tailTo zMethod
             | Exit -> il.Emit(OpCodes.Ret)
-            | ToState n -> 
+            | ToState n ->
                 let (nMethod, _) = definedMethods.[n]
                 tailTo nMethod
-        
+
         List.iter emit c.instructions
         emitLast c.lastInstruction
 
@@ -202,17 +215,7 @@ let buildType (fileName : string option) (progText : string) (chains : Map<strin
     let result = tb.CreateType()
 
     // if filename is given, define Main and save the assembly
-    fileName
-    |> Option.iter (fun fn ->
-        dynAsm.SetEntryPoint (defineMain dynMod result)
-        let f = Path.GetFileName fn
-        let d = Path.GetDirectoryName fn
-        if not (String.IsNullOrEmpty d)
-        then Directory.CreateDirectory(d) |> ignore
-        dynAsm.Save(f)
-        if f <> fn
-        then File.Delete(fn)
-        File.Move(f, fn)) 
+    options.outputFileName |> Option.iter (saveRunnableAssembly dynAsm dynMod result)
 
     result
 

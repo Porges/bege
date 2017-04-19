@@ -7,16 +7,16 @@ open Bege.Common
 open Bege.InstructionPointer
 open Bege.Options
 
-type StackValue = 
+type StackValue =
     /// A value that is statically known.
     | Known of int
     /// An unknown value (e.g. read from input).
-    | Unknown 
+    | Unknown
     /// A dead (unused) value, we will kill any discard it encounters.
     | KillDiscard
 
 type Stack
-    = UnknownStack 
+    = UnknownStack
     | EmptyStack
     | Value of StackValue * Stack
     // | UseLocal of Stack // TODO: how to do this?
@@ -42,25 +42,25 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
         | Some c -> Map.add k (c+1) m
 
     let countReferences m =
-            m |> Map.fold (fun cs _ c -> 
+            m |> Map.fold (fun cs _ c ->
                 match c.lastInstruction with
                 | Exit -> cs
                 | Branch (l, r) -> inc l (inc r cs)
                 | Rand targets -> List.fold (fun cs x -> inc x cs) cs targets
                 | ToState n -> inc n cs) Map.empty
-     
+
     let counts = countReferences program
 
     let canBeInlined fs =
         counts.[fs] = 1
-    
+
     let isJump fs =
         match program.[fs] with
         | { instructions = []; lastInstruction = ToState t } -> true
         | _ -> false
-    
-    let target fs = 
-        match program.[fs] with 
+
+    let target fs =
+        match program.[fs] with
         | { instructions = []; lastInstruction = ToState t } -> t
         | _ -> failwith "target must be guarded by isJump"
 
@@ -87,16 +87,16 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
     let newCounts = countReferences result
 
-    let trimmedResult = 
+    let trimmedResult =
         result
         (* can't remove entry state *)
         |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = EmptyStack))
-        
+
     if options.verbose
     then printfn "Inlining reduced chains from %d to %d." program.Count trimmedResult.Count
 
     trimmedResult
-    
+
 let rec peepholeOptimize (prog : Parser.Program) = function
     // Unneeded push/pops
     | Push :: Pop :: is -> peepholeOptimize prog is
@@ -114,10 +114,10 @@ type EventualFate = Pushed | Consumed | Discarded
 
 /// Figures out the eventual fate for a value that
 /// was just pushed onto the stack:
-let eventualFate lastInstruction instructions = 
+let eventualFate lastInstruction instructions =
     /// `st` = number of items on stack above the value.
     let rec eventualFateLocal st = function
-        | [] -> 
+        | [] ->
             if st <> 0
             then failwith "Ended up on local stack"
             else Consumed // there must be a branch next - TODO: check this
@@ -128,7 +128,7 @@ let eventualFate lastInstruction instructions =
             then eventualFateG 0 is
             else eventualFateLocal (st - 1) is
         | Pop :: is -> eventualFateLocal (st + 1) is
-        | InputNumber :: is 
+        | InputNumber :: is
         | InputChar :: is -> eventualFateLocal (st + 1) is
         | UnOp _ :: is
         | OutputChar :: is
@@ -159,16 +159,16 @@ let eventualFate lastInstruction instructions =
     and eventualFateG st = function
         | [] -> Pushed
         | Pop :: is ->
-            if st = 0 
+            if st = 0
             then eventualFateLocal 0 is
             else eventualFateG (st - 1) is
         | Push :: is -> eventualFateG (st + 1) is
         | Clear :: is -> Discarded
         | _ :: is -> eventualFateG st is
-    
+
     eventualFateLocal 0 instructions
-    
-let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : StateId) ((insns, last) : Chain<StateId>) : TypedChain<StateId> = 
+
+let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : StateId) ((insns, last) : Chain<StateId>) : TypedChain<StateId> =
 
     // acc = instruction acculuator
     // gs = global stack
@@ -189,7 +189,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
 
                     if read <> 0
                     then failwith "Logic problem - claiming read values for known empty stack"
-                    
+
                     { instructions = insns
                     ; lastInstruction = lastInsn
                     ; stackBehaviour = (0, wrote)
@@ -209,7 +209,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
                     ; lastInstruction = last
                     ; stackBehaviour = (read, wrote)
                     }
-             
+
             finale 0 gs
 
         | Load k :: is ->
@@ -233,7 +233,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
             //| UseLocal rest -> go acc rest ls is
 
         | Discard :: is ->
-            match ls with 
+            match ls with
             | KillDiscard :: ls -> go acc gs read ls is
             | _ :: ls -> go (Discard :: acc) gs read ls is
             | [] -> failwith (sprintf "Unexpected empty stack for discard.")
@@ -251,8 +251,8 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
 
         | BinOp op as bop :: is ->
             match ls with
-            | Known b :: Known a :: ls -> 
-                let result = 
+            | Known b :: Known a :: ls ->
+                let result =
                     match op with
                     | Multiply -> b * a
                     | Add -> b + a
@@ -281,7 +281,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
                     go (Load x :: Discard :: Discard :: acc) gs read (Known x :: ls) is
 
                 | _ -> go (bop :: acc) gs read (Unknown :: ls) is
-            
+
             | _ :: _ :: ls -> go (bop :: acc) gs read (Unknown :: ls) is // unknown result
             | _ -> failwith "Binary operation without enough arguments on stack"
 
@@ -291,7 +291,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
                 let result =
                     match op with
                     | Not -> if x = 0 then 1 else 0
-                
+
                 go (Load result :: Discard :: acc) gs read (Known result :: ls) is
 
             | Unknown :: ls -> go (UnOp op :: acc) gs read (Unknown :: ls) is // unknown result
@@ -308,7 +308,7 @@ let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : State
             | (x :: y :: ls) -> go (Flip :: acc) gs read (y :: x :: ls) is
             | _ -> failwith "Flip without enough arguments on stack"
 
-        | (InputChar as i) :: is 
+        | (InputChar as i) :: is
         | (InputNumber as i) :: is -> go (i :: acc) gs read (Unknown :: ls) is
 
     go [] initStack 0 [] insns
@@ -340,21 +340,21 @@ let optimizeLast fs last instructions =
 
     | c -> (instructions, c)
 
-let optimizeChain program stateId (chain : TypedChain<StateId>) = 
+let optimizeChain program stateId (chain : TypedChain<StateId>) =
     fix (peepholeOptimize program) chain.instructions
     |> optimizeLast stateId chain.lastInstruction
     |> performStackAnalysis program stateId
 
 /// performStackAnalysis can add references to "specializations"
 /// that don't exist yet. This function creates them.
-let instantiateSpecializations program = 
+let instantiateSpecializations program =
     // copy the existing one with "default" stack if it doesn't already exist
     let copyIfNotExists ((ip, _) as state) m =
         if not (Map.containsKey state m)
         then Map.add state (m.[(ip, UnknownStack)]) m
         else m
 
-    Map.fold (fun m k c -> 
+    Map.fold (fun m k c ->
         match c.lastInstruction with
         | ToState t -> copyIfNotExists t m
         | Branch (z, nz) -> copyIfNotExists z (copyIfNotExists nz m)
@@ -381,7 +381,7 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
     // rewrite all the last-instructions to remap their states
     inverted
     |> Map.toSeq
-    |> Seq.map (fun ((is, last), fss) -> 
+    |> Seq.map (fun ((is, last), fss) ->
         let newLast =
             match last with
             | Exit -> Exit
@@ -394,23 +394,26 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
 let augmentChain ((is, last) : Chain<IPState>) : Chain<StateId> =
     (is, LastInstruction.map (fun ipState -> (ipState, UnknownStack)) last)
 
-let optimize (options : Options) (program : Parser.Program) (chains : Program<IPState>)
-    : TypedProgram = 
+let optimize (options : Options) (programText : Parser.Program) (chains : Program<IPState>)
+    : TypedProgram =
 
-    let chainsWithStacks : TypedProgram = 
-        Map.fold (fun m k v ->
-            let (ipState, stack) =
-                if k = programEntryState
-                then (k, EmptyStack)
-                else (k, UnknownStack)
-            let typedChain = performStackAnalysis program (ipState, stack) (augmentChain v)
-            if options.verbose
-            then printfn "%A has stack behaviour %A" (ipState, stack) typedChain.stackBehaviour
+    // add initial types (stack behaviours) to the program
+    let typedProgram =
+        chains |> Map.fold (fun m ipState v ->
+            let stack =
+                if ipState = programEntryState
+                then EmptyStack
+                else UnknownStack
+
+            let typedChain = performStackAnalysis programText (ipState, stack) (augmentChain v)
+
+            if options.verbose then printfn "%A has stack behaviour %A" (ipState, stack) typedChain.stackBehaviour
+
             Map.add (ipState, stack) typedChain m)
-            Map.empty chains
+            Map.empty
 
-    fixN (fun n x ->
-        if options.verbose
-        then printfn "\nPerforming optimization pass %d" n
-        optimizeChains program (inlineChains options x)) (instantiateSpecializations chainsWithStacks)
-    
+    // optimize until we run out of optimizations
+    instantiateSpecializations typedProgram
+    |> fixN (fun n x ->
+        if options.verbose then printfn "\nPerforming optimization pass %d" n
+        optimizeChains programText (inlineChains options x))
