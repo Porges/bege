@@ -13,9 +13,9 @@ let assemblyName = AssemblyName "BefungeAssembly"
 let moduleName = "BefungeModule"
 let programClassName = "BefungeProgram"
 
-let defineRunMethod (tb : TypeBuilder) (definedMethods : Map<IPState, MethodBuilder * Chain>) : unit =
+let defineRunMethod (tb : TypeBuilder) (initialFunction : string) (definedMethods : Map<string, MethodBuilder * Chain<string>>) : unit =
     let runMethod = tb.DefineMethod("Run", MethodAttributes.Public ||| MethodAttributes.Virtual, typeof<int>, Type.EmptyTypes)
-    let (entryMethod, _) = definedMethods.[programEntryState]
+    let (entryMethod, _) = definedMethods.[initialFunction]
     let runIL = runMethod.GetILGenerator()
     runIL.Emit(OpCodes.Ldarg_0)
     runIL.Emit(OpCodes.Call, entryMethod)
@@ -65,7 +65,7 @@ let defineMain (dynMod : ModuleBuilder) (programType : Type) : MethodInfo =
     entryPoint.CreateType() |> ignore
     entryPoint.GetMethod("Main")
 
-let buildType (fileName : string option) (progText : string) (chains : AST.Program) : Type =
+let buildType (fileName : string option) (progText : string) (chains : Program<string>, initialFunction : string) : Type =
 
     let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
 
@@ -80,12 +80,10 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
 
     let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.BefungeBase>)
 
-    let nameFromState { delta = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
-
     let definedMethods =
         let defineMethod fs chain = 
             // printfn "Defining %s" (nameFromState fs)
-            let method = tb.DefineMethod(nameFromState fs, MethodAttributes.Private) in
+            let method = tb.DefineMethod(fs, MethodAttributes.Private) in
             (method, chain) in
         chains |> Map.map defineMethod
 
@@ -198,7 +196,7 @@ let buildType (fileName : string option) (progText : string) (chains : AST.Progr
 
     Map.iter buildMethod definedMethods
 
-    defineRunMethod tb definedMethods
+    defineRunMethod tb initialFunction definedMethods
     defineConstructor tb progText
 
     let result = tb.CreateType()

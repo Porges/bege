@@ -103,7 +103,7 @@ let ``can wrap around from first position`` () =
 
 [<Fact>]
 let ``optimized branch still pops`` ()  =
-    verifyOptimized "12v\n@._.@" "" "1 " 1
+    verifyOptimized "12v\n@._.@" "" "1 " 3
 
 [<Fact>]
 let ``98 string mode collapses multiple spaces`` () =

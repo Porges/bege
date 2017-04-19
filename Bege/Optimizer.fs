@@ -6,7 +6,17 @@ open Bege.AST
 open Bege.Common
 open Bege.InstructionPointer
 
-let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
+
+type Stack
+    = UnknownStack of int // how many values have we popped from this
+    | EmptyStack
+    | Value of int option * Stack
+
+type LocalStack = int option list
+
+type StateId = IPState * Stack
+
+let inlineChains (program : Program<StateId>) : Program<StateId> =
 
     let inc k m =
         match Map.tryFind k m with
@@ -21,28 +31,28 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
                 | Rand targets -> List.fold (fun cs x -> inc x cs) cs targets
                 | ToState n -> inc n cs) Map.empty
      
-    let counts = countReferences m
+    let counts = countReferences program
 
     let canBeInlined fs =
         counts.[fs] = 1
     
     let isJump fs =
-        match m.[fs] with
+        match program.[fs] with
         | ([], ToState t) -> true
         | _ -> false
     
     let target fs = 
-        match m.[fs] with 
+        match program.[fs] with 
         | ([], ToState t) -> t
         | _ -> failwith "target must be guarded by isJump"
 
     let result =
-        m
+        program
         |> Map.map (fun fs ((il, li) as value) ->
             match li with
             | ToState n when canBeInlined n || isJump n ->
                 // printfn "Inlining %A into %A" n fs
-                let il', li' = m.[n] in
+                let il', li' = program.[n] in
                 (List.append il il', li')
             | Branch (l, r) when isJump l || isJump r ->
                 let l = if isJump l then target l else l
@@ -56,7 +66,9 @@ let inlineChains (m : Map<IPState, Instruction list * LastInstruction>) =
 
     let newCounts = countReferences result
 
-    result |> Map.filter (fun k _ -> newCounts.ContainsKey k || k = programEntryState (* can't remove entry state *))
+    result
+    |> Map.filter (fun ((ip, _) as k) _ -> newCounts.ContainsKey k || ip = programEntryState)
+    (* can't remove entry state *)
 
 let rec peepholeOptimize (prog : Parser.Program) = function
     // Unneeded push/pops
@@ -92,18 +104,21 @@ let rec peepholeOptimize (prog : Parser.Program) = function
     | (i :: is) -> i :: peepholeOptimize prog is
     | [] -> []
 
-type Stack
-    = UnknownStack of int // how many values have we popped from this
-    | EmptyStack
-    | Value of int option * Stack
-
-type LocalStack = int option list
-
-let rec performStackAnalysis (program : Parser.Program) ip (insns, last) = 
+let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, last) = 
 
     // go : GlobalStack -> LocalStack -> Instruction list
     let rec go gs ls = function
-        | [] -> (insns, last)
+        | [] ->
+            match last with
+            | Branch _ ->
+                if List.length ls <> 1
+                then failwith "Branch without push before it"
+            | _ ->
+                if not (List.isEmpty ls)
+                then failwith "Function ended with non-empty local stack"
+
+            (insns, last)
+
         | Load k :: is -> go gs (Some k :: ls) is
         | Push :: is ->
             match ls with
@@ -114,7 +129,9 @@ let rec performStackAnalysis (program : Parser.Program) ip (insns, last) =
             | EmptyStack -> go EmptyStack (Some 0 :: ls) is
             | UnknownStack pops -> go (UnknownStack (pops+1)) (None :: ls) is
             | Value (v, rest) -> go rest (v :: ls) is
-        | Discard :: is | OutputChar :: is | OutputNumber :: is ->
+        | Discard :: is
+        | OutputChar :: is
+        | OutputNumber :: is ->
             match ls with
             | (_ :: ls) -> go gs ls is
             | [] -> failwith "Unexpected empty stack"
@@ -123,8 +140,9 @@ let rec performStackAnalysis (program : Parser.Program) ip (insns, last) =
             | [] -> go EmptyStack ls is
             | _ -> failwith "Clear with unclear local stack"
         | BinOp op :: is ->
+
             match ls with
-            | (Some a :: Some b :: ls) -> 
+            | Some a :: Some b :: ls -> 
                 let result = 
                     match op with
                     | Multiply -> b * a
@@ -135,14 +153,29 @@ let rec performStackAnalysis (program : Parser.Program) ip (insns, last) =
                     | ReadText -> program.[a, b]
                     | Greater -> if b > a then 1 else 0
                 go gs (Some result :: ls) is
+
+            | Some 0 :: x :: ls
+            | x :: Some 0 :: ls ->
+                match op with
+                | Multiply -> go gs (Some 0 :: ls) is
+                | Add -> go gs (x :: ls) is
+                | _ -> go gs (None :: ls) is
+
+            | Some 1 :: x :: ls
+            | x :: Some 1 :: ls ->
+                match op with
+                | Multiply -> go gs (x :: ls) is
+                | _ -> go gs (None :: ls) is
+            
             | _ :: _ :: ls -> go gs (None :: ls) is // unknown result
             | _ -> failwith "Binary operation without enough arguments on stack"
+
         | UnOp op :: is ->
             match ls with
-            | Some a :: ls ->
+            | Some x :: ls ->
                 let result =
                     match op with
-                    | Not -> if a = 0 then 1 else 0
+                    | Not -> if x = 0 then 1 else 0
                 
                 go gs (Some result :: ls) is
 
@@ -160,7 +193,7 @@ let rec performStackAnalysis (program : Parser.Program) ip (insns, last) =
         | InputChar :: is -> go gs (None :: ls) is
         | InputNumber :: is -> go gs (None :: ls) is
 
-    go (UnknownStack 0) [] insns
+    go initStack [] insns
 
 let optimizeLast fs last instructions =
     let noInstructions = List.isEmpty instructions
@@ -189,14 +222,15 @@ let optimizeLast fs last instructions =
 
     | c -> (instructions, c)
 
-let optimizeChain program ipState (insns, last) = 
+let optimizeChain program stateId (insns, last) = 
     fix (peepholeOptimize program) insns
-    |> optimizeLast ipState last
-    |> performStackAnalysis program ipState
+    |> optimizeLast stateId last
+    |> performStackAnalysis program stateId
 
 let optimizeChains program = Map.map (optimizeChain program)
 
-let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction>) : Map<IPState, Instruction list * LastInstruction> =
+// TODO: update to work with new types
+let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction<IPState>>) : Map<IPState, Instruction list * LastInstruction<IPState>> =
 
     // invert the map, now all states with the same instruction list are in the same slot
     let inverted = invertMap m
@@ -220,7 +254,19 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
         (List.min fss, (is, newLast)))
     |> Map.ofSeq
 
-let optimize (program : Parser.Program) (chains : Map<IPState, Instruction list * LastInstruction>)
-    : Map<IPState, Instruction list * LastInstruction> = 
+let augmentChain ((is, last) : Chain<IPState>) : Chain<StateId> =
+    (is, LastInstruction.map (fun ipState -> (ipState, UnknownStack 0)) last)
 
-    fix (optimizeChains program << inlineChains << collapseIdenticalChains) chains
+let optimize (program : Parser.Program) (chains : Program<IPState>)
+    : Program<StateId> = 
+
+    let chainsWithStacks = 
+        Map.fold (fun m k v ->
+            let newKey =
+                if k = programEntryState
+                then (k, EmptyStack)
+                else (k, UnknownStack 0)
+            Map.add newKey (augmentChain v) m) Map.empty chains
+
+    fix (optimizeChains program << inlineChains) chainsWithStacks
+    

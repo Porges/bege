@@ -26,16 +26,24 @@ type Instruction =
     | BinOp of BinOp
     | UnOp of UnOp
 
-type LastInstruction =
+type LastInstruction<'a> =
     | Exit
-    | ToState of next : IPState
-    | Branch of zero : IPState * nonZero : IPState
-    | Rand of IPState list
+    | ToState of next : 'a
+    | Branch of zero : 'a * nonZero : 'a
+    | Rand of 'a list
 
-type Chain = Instruction list * LastInstruction
-type Program = Map<IPState, Instruction list * LastInstruction>
+module LastInstruction =
+    // LastInstruction is a functor
+    let map f = function
+        | Exit -> Exit
+        | ToState t -> ToState (f t)
+        | Branch (z, nz) -> Branch (f z, f nz)
+        | Rand ts -> Rand (List.sort (List.map f ts))
 
-let computeChains (prog : Parser.Program) (options : Options) : Program =
+type Chain<'a> = Instruction list * LastInstruction<'a>
+type Program<'a when 'a : comparison> = Map<'a, Chain<'a>>
+
+let computeChains (prog : Parser.Program) (options : Options) : Program<IPState> =
 
     let checkYear y command = 
         if y > options.standard.year
@@ -58,7 +66,7 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
 
     while toCompile.Count > 0 do
 
-        let rec follow chain (ip : IPState) : (Instruction list * LastInstruction) = 
+        let rec follow chain (ip : IPState) : Chain<IPState> = 
 
             let go xs =
                 follow (List.append (List.rev xs) chain) (advance ip)
@@ -121,7 +129,7 @@ let computeChains (prog : Parser.Program) (options : Options) : Program =
                     then eprintf "Warning: unsupported instruction '%c', treating as if 'r'." c
                     newChain (reflect ip.delta)
                  
-        and readString acc (state : IPState) : (Instruction list * LastInstruction) =
+        and readString acc (state : IPState) : Chain<IPState> =
             match char (read state.position) with
             | '"' -> follow acc (advance state)
             | ' ' when options.standard.year = 98 ->
