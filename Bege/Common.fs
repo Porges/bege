@@ -11,6 +11,15 @@ let rec fix f x =
     if x' = x then x'
     else fix f x'
 
+let fixN f x = 
+
+    let rec go f i x =
+        let x' = f i x
+        if x' = x then x'
+        else go f (i+1) x'
+
+    go f 0 x
+
 let inline invertMap it = 
     let f m k v =
         match Map.tryFind v m with

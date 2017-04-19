@@ -15,7 +15,7 @@ module Dir =
     let down = struct (1, 0)
 
 /// Instruction pointer state
-[<StructuredFormatDisplay("{dir} {position}")>]
+[<StructuredFormatDisplay("{delta} {position}")>]
 type [<Struct>] IPState = { position : Position; delta : Delta }
 
 /// Initial pointer state

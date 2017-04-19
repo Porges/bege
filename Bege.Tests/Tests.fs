@@ -13,6 +13,7 @@ let private verify code input output =
             { outputFileName = None
             ; optimize = optimize
             ; standard = befunge98
+            ; verbose = false
             }
 
         use inS = new StringReader(input)
@@ -28,6 +29,7 @@ let private verifyMode year code input output =
             { outputFileName = None
             ; optimize = optimize
             ; standard = { befunge98 with year = year }
+            ; verbose = false
             }
 
         use inS = new StringReader(input)
@@ -42,6 +44,7 @@ let private verifyOptimized code input output expectedInsns =
         { outputFileName = None
         ; optimize = true
         ; standard = befunge98
+        ; verbose = false
         }
 
     use inS = new StringReader(input)

@@ -31,4 +31,5 @@ type Options =
     { standard : Standard
     ; optimize : bool
     ; outputFileName : string option
+    ; verbose : bool
     }

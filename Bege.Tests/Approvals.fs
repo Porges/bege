@@ -22,6 +22,7 @@ let getOutput fileName optimize =
         { outputFileName = Some outputPath
         ; optimize = optimize
         ; standard = befunge98
+        ; verbose = false
         }
 
     compile options code |> ignore

@@ -13,6 +13,7 @@ type Arguments =
     ; [<Option('o', "output")>] output : string option
     ; [<Option('O', "optimize", Default = true)>] optimize : bool
     ; [<Option("std", Default = "befunge98")>] standard : string
+    ; [<Option('v', "verbose", Default = false)>] verbose : bool
     }
 
 let executeProgram befungeType = 
@@ -51,6 +52,7 @@ let main argv =
                     { standard = standard
                     ; outputFileName = args.output
                     ; optimize = args.optimize
+                    ; verbose = args.verbose
                     }
                 0
             | None ->

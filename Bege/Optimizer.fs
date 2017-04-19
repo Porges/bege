@@ -5,6 +5,7 @@ open System
 open Bege.AST
 open Bege.Common
 open Bege.InstructionPointer
+open Bege.Options
 
 
 type Stack
@@ -16,7 +17,7 @@ type LocalStack = int option list
 
 type StateId = IPState * Stack
 
-let inlineChains (program : Program<StateId>) : Program<StateId> =
+let inlineChains (options : Options) (program : Program<StateId>) : Program<StateId> =
 
     let inc k m =
         match Map.tryFind k m with
@@ -51,7 +52,7 @@ let inlineChains (program : Program<StateId>) : Program<StateId> =
         |> Map.map (fun fs ((il, li) as value) ->
             match li with
             | ToState n when canBeInlined n || isJump n ->
-                // printfn "Inlining %A into %A" n fs
+                // if options.verbose then printfn "Inlining %A into %A" n fs
                 let il', li' = program.[n] in
                 (List.append il il', li')
             | Branch (l, r) when isJump l || isJump r ->
@@ -66,9 +67,16 @@ let inlineChains (program : Program<StateId>) : Program<StateId> =
 
     let newCounts = countReferences result
 
-    result
-    |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = EmptyStack))
-    (* can't remove entry state *)
+    let trimmedResult = 
+        result
+        (* can't remove entry state *)
+        |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = EmptyStack))
+        
+    if options.verbose
+    then printfn "Inlining reduced chains from %d to %d." program.Count trimmedResult.Count
+
+    trimmedResult
+    
 
 let rec peepholeOptimize (prog : Parser.Program) = function
     // Unneeded push/pops
@@ -282,7 +290,7 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
 let augmentChain ((is, last) : Chain<IPState>) : Chain<StateId> =
     (is, LastInstruction.map (fun ipState -> (ipState, UnknownStack 0)) last)
 
-let optimize (program : Parser.Program) (chains : Program<IPState>)
+let optimize (options : Options) (program : Parser.Program) (chains : Program<IPState>)
     : Program<StateId> = 
 
     let chainsWithStacks = 
@@ -293,5 +301,8 @@ let optimize (program : Parser.Program) (chains : Program<IPState>)
                 else (k, UnknownStack 0)
             Map.add newKey (augmentChain v) m) Map.empty chains
 
-    fix (optimizeChains program << inlineChains) chainsWithStacks
+    fixN (fun n x ->
+        if options.verbose
+        then printfn "\nPerforming optimization pass %d" n
+        optimizeChains program (inlineChains options x)) chainsWithStacks
     
