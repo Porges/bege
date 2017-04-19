@@ -23,7 +23,7 @@ let compile (options : Options) (text : string) : Type =
     computeChains prog options
     |> (fun p ->
         if options.optimize
-        then (mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack) (optimize options prog p), nameFromIPAndStack (programEntryState, EmptyStack))
+        then (mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack) (Map.map (fun _ v -> (v.instructions, v.lastInstruction)) (optimize options prog p)), nameFromIPAndStack (programEntryState, EmptyStack))
         else (mapKV nameFromIP (updateInstructions nameFromIP) p), nameFromIP programEntryState)
     |> buildType options.outputFileName text
 
