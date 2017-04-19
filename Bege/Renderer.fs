@@ -6,14 +6,14 @@ open System.Reflection
 open System.Reflection.Emit
 
 open Bege.AST
-open Bege.InstructionPointer
 open Bege.Runtime
+open Bege.Optimizer
 
 let assemblyName = AssemblyName "BefungeAssembly"
 let moduleName = "BefungeModule"
 let programClassName = "BefungeProgram"
 
-let defineRunMethod (tb : TypeBuilder) (initialFunction : string) (definedMethods : Map<string, MethodBuilder * Chain<string>>) : unit =
+let defineRunMethod (tb : TypeBuilder) (initialFunction : string) (definedMethods : Map<string, MethodBuilder * TypedChain<string>>) : unit =
     let runMethod = tb.DefineMethod("Run", MethodAttributes.Public ||| MethodAttributes.Virtual, typeof<int>, Type.EmptyTypes)
     let (entryMethod, _) = definedMethods.[initialFunction]
     let runIL = runMethod.GetILGenerator()
@@ -65,7 +65,7 @@ let defineMain (dynMod : ModuleBuilder) (programType : Type) : MethodInfo =
     entryPoint.CreateType() |> ignore
     entryPoint.GetMethod("Main")
 
-let buildType (fileName : string option) (progText : string) (chains : Program<string>, initialFunction : string) : Type =
+let buildType (fileName : string option) (progText : string) (chains : Map<string, TypedChain<string>>, initialFunction : string) : Type =
 
     let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
 
@@ -87,7 +87,7 @@ let buildType (fileName : string option) (progText : string) (chains : Program<s
             (method, chain) in
         chains |> Map.map defineMethod
 
-    let buildMethod fs (method : MethodBuilder, (instructions, lastInstruction)) =
+    let buildMethod fs (method : MethodBuilder, c) =
         // printfn "Emitting method: %s" (nameFromState fs)
         let il = method.GetILGenerator()
         let l1 = il.DeclareLocal(typeof<int>)
@@ -191,8 +191,8 @@ let buildType (fileName : string option) (progText : string) (chains : Program<s
                 let (nMethod, _) = definedMethods.[n]
                 tailTo nMethod
         
-        List.iter emit instructions
-        emitLast lastInstruction
+        List.iter emit c.instructions
+        emitLast c.lastInstruction
 
     Map.iter buildMethod definedMethods
 

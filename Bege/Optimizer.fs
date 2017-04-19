@@ -26,13 +26,13 @@ type StackBehaviour = int * int
 type LocalStack = StackValue list
 type StateId = IPState * Stack
 
-type TypedChain =
+type TypedChain<'a> =
     { instructions : Instruction list
     ; stackBehaviour : StackBehaviour
-    ; lastInstruction  : LastInstruction<StateId>
+    ; lastInstruction  : LastInstruction<'a>
     }
 
-type TypedProgram = Map<StateId, TypedChain>
+type TypedProgram = Map<StateId, TypedChain<StateId>>
 
 let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
@@ -142,8 +142,10 @@ let eventualFate lastInstruction instructions =
             else eventualFateLocal (st - 1) is
         | Flip :: is ->
             match st with
-            | 0 -> eventualFateLocal (st + 1) is
-            | 1 -> eventualFateLocal 0 is
+            // TODO: think about this, fix and restore
+            //| 0 -> eventualFateLocal (st + 1) is
+            //| 1 -> eventualFateLocal 0 is
+            | 0 | 1 -> Consumed
             | _ -> eventualFateLocal st is
         | Discard :: is ->
             if st = 0
@@ -166,7 +168,7 @@ let eventualFate lastInstruction instructions =
     
     eventualFateLocal 0 instructions
     
-let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : StateId) ((insns, last) : Chain<StateId>) : TypedChain = 
+let rec performStackAnalysis (program : Parser.Program) ((ip, initStack) : StateId) ((insns, last) : Chain<StateId>) : TypedChain<StateId> = 
 
     // acc = instruction acculuator
     // gs = global stack
@@ -338,7 +340,7 @@ let optimizeLast fs last instructions =
 
     | c -> (instructions, c)
 
-let optimizeChain program stateId (chain : TypedChain) = 
+let optimizeChain program stateId (chain : TypedChain<StateId>) = 
     fix (peepholeOptimize program) chain.instructions
     |> optimizeLast stateId chain.lastInstruction
     |> performStackAnalysis program stateId

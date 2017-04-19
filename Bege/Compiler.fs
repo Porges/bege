@@ -13,18 +13,26 @@ open System.IO
 open System.Text
 
 let nameFromIP { delta = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
-let nameFromIPAndStack (ip, stack) = sprintf "%s_%A" (nameFromIP ip) stack
-let updateInstructions f (insns, last) = (insns, LastInstruction.map f last)
+let nameFromIPAndStack ((ip, stack) : StateId) = sprintf "%s_%A" (nameFromIP ip) stack
+// boo, `with` can't change generic type!
+let updateInstructions f c = { instructions = c.instructions; lastInstruction = LastInstruction.map f c.lastInstruction; stackBehaviour = c.stackBehaviour }
 let mapKV kf vf m = Map.fold (fun m k v -> Map.add (kf k) (vf v) m) Map.empty m
 
-let compile (options : Options) (text : string) : Type =
+let optimizeAndMapToCommonType options programText p : Map<string, TypedChain<string>> * string =
+    if options.optimize
+    then
+        let program = optimize options programText p |> mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack)
+        let entryPoint = nameFromIPAndStack (programEntryState, EmptyStack)
+        (program, entryPoint)
+    else
+        let program = p |> mapKV nameFromIP (fun v -> { instructions = fst v; lastInstruction = LastInstruction.map nameFromIP (snd v); stackBehaviour = (0,0) })
+        let entryPoint = nameFromIP programEntryState
+        (program, entryPoint)
 
+let compile (options : Options) (text : string) : Type =
     let prog = Parser.parse text
     computeChains prog options
-    |> (fun p ->
-        if options.optimize
-        then (mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack) (Map.map (fun _ v -> (v.instructions, v.lastInstruction)) (optimize options prog p)), nameFromIPAndStack (programEntryState, EmptyStack))
-        else (mapKV nameFromIP (updateInstructions nameFromIP) p), nameFromIP programEntryState)
+    |> optimizeAndMapToCommonType options prog
     |> buildType options.outputFileName text
 
 let run prog (seed : uint64) (input : TextReader) (output : TextWriter) options =
