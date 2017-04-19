@@ -67,7 +67,7 @@ let inlineChains (program : Program<StateId>) : Program<StateId> =
     let newCounts = countReferences result
 
     result
-    |> Map.filter (fun ((ip, _) as k) _ -> newCounts.ContainsKey k || ip = programEntryState)
+    |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = EmptyStack))
     (* can't remove entry state *)
 
 let rec peepholeOptimize (prog : Parser.Program) = function
@@ -109,15 +109,22 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
     // go : GlobalStack -> LocalStack -> Instruction list
     let rec go gs ls = function
         | [] ->
-            match last with
-            | Branch _ ->
-                if List.length ls <> 1
-                then failwith "Branch without push before it"
-            | _ ->
-                if not (List.isEmpty ls)
-                then failwith "Function ended with non-empty local stack"
+            match gs with
+            | EmptyStack ->
+                // we know it's empty so we can propagate that information
+                // to the next chain
+                (insns, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
 
-            (insns, last)
+            | _ ->
+                match last with
+                | Branch _ ->
+                    if List.length ls <> 1
+                    then failwith "Branch without push before it"
+                | _ ->
+                    if not (List.isEmpty ls)
+                    then failwith "Function ended with non-empty local stack"
+
+                (insns, last)
 
         | Load k :: is -> go gs (Some k :: ls) is
         | Push :: is ->
@@ -227,7 +234,25 @@ let optimizeChain program stateId (insns, last) =
     |> optimizeLast stateId last
     |> performStackAnalysis program stateId
 
-let optimizeChains program = Map.map (optimizeChain program)
+let optimizeChains programText program  =
+    let newProgram = Map.map (optimizeChain programText) program
+
+    // it could be the case that performStackAnalysis added references
+    // to specialized chains that don't exist, so we will instantiate them:
+
+    // copy the existing one with "default" stack if it doesn't already exist
+    let copyIfNotExists ((ip, _) as state) m =
+        if not (Map.containsKey state m)
+        then Map.add state (m.[(ip, UnknownStack 0)]) m
+        else m
+
+    Map.fold (fun m k (_, last) -> 
+        match last with
+        | ToState t -> copyIfNotExists t m
+        | Branch (z, nz) -> copyIfNotExists z (copyIfNotExists nz m)
+        | Rand ts -> List.fold (fun m t -> copyIfNotExists t m) m ts
+        | Exit -> m
+        ) newProgram newProgram
 
 // TODO: update to work with new types
 let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction<IPState>>) : Map<IPState, Instruction list * LastInstruction<IPState>> =
