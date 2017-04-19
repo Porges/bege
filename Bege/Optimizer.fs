@@ -8,15 +8,22 @@ open Bege.InstructionPointer
 open Bege.Options
 
 type StackValue = 
+    /// A value that is statically known.
     | Known of int
+    /// An unknown value (e.g. read from input).
     | Unknown 
+    /// A dead (unused) value, we will kill any discard it encounters.
     | KillDiscard
 
 type Stack
     = UnknownStack of int // how many values have we popped from this
     | EmptyStack
-    | UseLocal of Stack
+    // | UseLocal of Stack // TODO: how to do this?
     | Value of StackValue * Stack
+
+/// How many items the chain pops, and how many it stores.
+type StackBehaviour =
+    StackBehaviour of int * int
 
 type LocalStack = StackValue list
 
@@ -97,64 +104,67 @@ let rec peepholeOptimize (prog : Parser.Program) = function
 
 type EventualFate = Pushed | Consumed | Discarded
 
+/// Figures out the eventual fate for a value.
+/// `st` = number of items on stack above the value.
+let rec eventualFateLocal st = function
+    | [] -> 
+        if st <> 0
+        then failwith "Ended up on local stack"
+        else Consumed // there must be a branch next - TODO: check this
+    | Clear :: is -> failwith "Cleared while on local stack"
+    | Load k :: is -> eventualFateLocal (st + 1) is
+    | Push :: is ->
+        if st = 0
+        then eventualFateG 0 is
+        else eventualFateLocal (st - 1) is
+    | Pop :: is -> eventualFateLocal (st + 1) is
+    | InputNumber :: is 
+    | InputChar :: is -> eventualFateLocal (st + 1) is
+    | UnOp _ :: is
+    | OutputChar :: is
+    | OutputNumber :: is ->
+        if st = 0
+        then Consumed
+        else eventualFateLocal (st - 1) is
+    | Dup :: is ->
+        if st = 0
+        then Consumed
+        else eventualFateLocal (st - 1) is
+    | Flip :: is ->
+        match st with
+        | 0 -> eventualFateLocal (st + 1) is
+        | 1 -> eventualFateLocal 0 is
+        | _ -> eventualFateLocal st is
+    | Discard :: is ->
+        if st = 0
+        then Discarded
+        else eventualFateLocal (st - 1) is
+    | BinOp op :: is ->
+        if st < 2
+        then Consumed
+        else eventualFateLocal (st - 1) is
+
+and eventualFateG st = function
+    | [] -> Pushed
+    | Pop :: is ->
+        if st = 0 
+        then eventualFateLocal 0 is
+        else eventualFateG (st - 1) is
+    | Push :: is -> eventualFateG (st + 1) is
+    | Clear :: is -> Discarded
+    | _ :: is -> eventualFateG st is
+    
 let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, last) = 
 
-    let rec eventualFateLocal st = function
-        | [] -> 
-            if st <> 0
-            then failwith "Ended up on local stack"
-            else Consumed // there must be a branch next - TODO: check this
-        | Clear :: is -> failwith "Cleared while on local stack"
-        | Load k :: is -> eventualFateLocal (st + 1) is
-        | Push :: is ->
-            if st = 0
-            then eventualFateG 0 is
-            else eventualFateLocal (st - 1) is
-        | Pop :: is -> eventualFateLocal (st + 1) is
-        | InputNumber :: is 
-        | InputChar :: is -> eventualFateLocal (st + 1) is
-        | UnOp _ :: is
-        | OutputChar :: is
-        | OutputNumber :: is ->
-            if st = 0
-            then Consumed
-            else eventualFateLocal (st - 1) is
-        | Dup :: is ->
-            if st = 0
-            then Consumed
-            else eventualFateLocal (st - 1) is
-        | Flip :: is ->
-            match st with
-            | 0 -> eventualFateLocal (st + 1) is
-            | 1 -> eventualFateLocal 0 is
-            | _ -> eventualFateLocal st is
-        | Discard :: is ->
-            if st = 0
-            then Discarded
-            else eventualFateLocal (st - 1) is
-        | BinOp op :: is ->
-            if st < 2
-            then Consumed
-            else eventualFateLocal (st - 1) is
-
-    and eventualFateG st = function
-        | [] -> Pushed
-        | Pop :: is ->
-            if st = 0 
-            then eventualFateLocal 0 is
-            else eventualFateG (st - 1) is
-        | Push :: is -> eventualFateG (st + 1) is
-        | Clear :: is -> Discarded
-        | _ :: is -> eventualFateG st is
-
-    
-    // go : GlobalStack -> LocalStack -> Instruction list
+    // acc = instruction acculuator
+    // gs = global stack
+    // ls = local stack
     let rec go acc gs ls = function
         | [] ->
             match gs with
             | EmptyStack ->
                 // we know it's empty so we can propagate that information
-                // to the next chain
+                // to the next chain.
                 (List.rev acc, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
 
             | _ ->
@@ -173,11 +183,13 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
             match eventualFateLocal 0 is with
             | Discarded -> go acc gs (KillDiscard :: ls) is
             | _ -> go (Load k :: acc) gs (Known k :: ls) is
+
         | Push :: is ->
             match ls with
             | KillDiscard :: ls -> go acc (Value (KillDiscard, gs)) ls is
             | l :: ls -> go (Push :: acc) (Value (l, gs)) ls is
             | [] -> failwith "Pushed from empty local stack"
+
         | Pop :: is ->
             match gs with
             | EmptyStack -> go (Load 0 :: acc) EmptyStack (Known 0 :: ls) is
@@ -185,22 +197,26 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
             | Value (Known x, rest) -> go (Load x :: Discard :: Pop :: acc) rest (Known x :: ls) is
             | Value (Unknown, rest) -> go (Pop :: acc) rest (Unknown :: ls) is
             | Value (KillDiscard, rest) -> go acc rest (KillDiscard :: ls) is
-            | UseLocal rest -> go acc rest ls is
+            //| UseLocal rest -> go acc rest ls is
+
         | Discard :: is ->
             match ls with 
             | KillDiscard :: ls -> go acc gs ls is
             | _ :: ls -> go (Discard :: acc) gs ls is
             | [] -> failwith (sprintf "Unexpected empty stack for discard.")
+
         | (OutputChar as i) :: is
         | (OutputNumber as i) :: is ->
             match ls with
             | (_ :: ls) -> go (i :: acc) gs ls is
             | [] -> failwith (sprintf "Unexpected empty stack for %A instruction" i)
+
         | Clear :: is ->
             match ls with
             | [] -> go (Clear :: acc) EmptyStack ls is
             | _ -> failwith "Clear with unclear local stack"
-        | BinOp op :: is ->
+
+        | BinOp op as bop :: is ->
             match ls with
             | Known b :: Known a :: ls -> 
                 let result = 
@@ -216,24 +232,24 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
 
             | Known 0 :: x :: ls
             | x :: Known 0 :: ls ->
-                match op with
-                | Multiply -> go (Load 0 :: Discard :: Discard :: acc) gs (Known 0 :: ls) is
-                | Add ->
-                    match x with 
-                    | Known x -> go (Load x :: Discard :: Discard :: acc) gs (Known x :: ls) is
-                    | _ -> go (BinOp op :: acc) gs (Unknown :: ls) is
-                | _ -> go (BinOp op :: acc) gs (Unknown :: ls) is
+                match (op, x) with
+                | (Multiply, _) ->
+                    go (Load 0 :: Discard :: Discard :: acc) gs (Known 0 :: ls) is
+
+                | (Add, Known x) ->
+                    go (Load x :: Discard :: Discard :: acc) gs (Known x :: ls) is
+
+                | _ -> go (bop :: acc) gs (Unknown :: ls) is
 
             | Known 1 :: x :: ls
             | x :: Known 1 :: ls ->
-                match op with
-                | Multiply ->
-                    match x with
-                    | Known x -> go (Load x :: Discard :: Discard :: acc) gs (Known x :: ls) is
-                    | _ -> go (BinOp op :: acc) gs (Unknown :: ls) is
-                | _ -> go (BinOp op :: acc) gs (Unknown :: ls) is
+                match (op, x) with
+                | (Multiply, Known x) ->
+                    go (Load x :: Discard :: Discard :: acc) gs (Known x :: ls) is
+
+                | _ -> go (bop :: acc) gs (Unknown :: ls) is
             
-            | _ :: _ :: ls -> go (BinOp op :: acc) gs (Unknown :: ls) is // unknown result
+            | _ :: _ :: ls -> go (bop :: acc) gs (Unknown :: ls) is // unknown result
             | _ -> failwith "Binary operation without enough arguments on stack"
 
         | UnOp op :: is ->
@@ -252,11 +268,13 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
             match ls with
             | (v :: _) -> go (Dup :: acc) gs (v :: ls) is
             | [] -> failwith "Dup with empty stack"
+
         | Flip :: is ->
             match ls with
             | (Known x :: Known y :: ls) -> go (Load y :: Load x :: Discard :: Discard :: acc) gs (Known y :: Known x :: ls) is
             | (x :: y :: ls) -> go (Flip :: acc) gs (y :: x :: ls) is
             | _ -> failwith "Flip without enough arguments on stack"
+
         | (InputChar as i) :: is 
         | (InputNumber as i) :: is -> go (i :: acc) gs (Unknown :: ls) is
 
