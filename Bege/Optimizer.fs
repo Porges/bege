@@ -83,45 +83,24 @@ let rec peepholeOptimize (prog : Parser.Program) = function
     | Push :: Pop :: is -> peepholeOptimize prog is
     | Dup :: Pop :: is -> peepholeOptimize prog is
     | Load _ :: Discard :: is -> peepholeOptimize prog is
-    // constant folding
-    | Load b :: Push :: Load a :: Pop :: BinOp k :: is ->
-        let apply a b =
-            match k with
-            | Add -> b + a
-            | Subtract -> b - a
-            | Multiply -> b * a
-            | Divide -> b / a
-            | Modulo -> b % a
-            | Greater -> if b > a then 1 else 0
-            | ReadText -> prog.[a, b]
-
-        peepholeOptimize prog (Load (apply a b) :: is)
-    //| Push x :: Push y :: Add :: is -> peepholeOptimize (Push (x + y) :: is)
-    //| Push x :: Push y :: Divide :: is -> peepholeOptimize (Push (x / y) :: is)
-    //| Push x :: Push y :: Multiply :: is -> peepholeOptimize (Push (x * y) :: is)
-    //| Push x :: Push y :: Subtract :: is -> peepholeOptimize (Push (x - y) :: is)
-    //| Push x :: Push y :: Greater :: is -> peepholeOptimize (Push (Convert.ToInt32(x > y)) :: is)
-    //| Push x :: Not :: is -> peepholeOptimize (Push (Convert.ToInt32((x = 0))) :: is)
     // eliminate unneeded nots
     | UnOp Not :: UnOp Not :: is -> peepholeOptimize prog is
     // eliminate unneeded flips
-    //| Push :: Push :: Pop :: Pop :: Flip :: is -> peepholeOptimize (Push y :: Push x :: is)
     | Flip :: Flip :: is -> peepholeOptimize prog is
     | Dup :: Flip :: is -> Dup :: peepholeOptimize prog is
-    // eliminate dead pushes
     | (i :: is) -> i :: peepholeOptimize prog is
     | [] -> []
 
 let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, last) = 
 
     // go : GlobalStack -> LocalStack -> Instruction list
-    let rec go gs ls = function
+    let rec go acc gs ls = function
         | [] ->
             match gs with
             | EmptyStack ->
                 // we know it's empty so we can propagate that information
                 // to the next chain
-                (insns, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
+                (List.rev acc, LastInstruction.map (fun (ip, st) -> (ip, EmptyStack)) last)
 
             | _ ->
                 match last with
@@ -132,32 +111,32 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
                     if not (List.isEmpty ls)
                     then failwith "Function ended with non-empty local stack"
 
-                (insns, last)
+                (List.rev acc, last)
 
-        | Load k :: is -> go gs (Some k :: ls) is
+        | Load k :: is -> go (Load k :: acc) gs (Some k :: ls) is
         | Push :: is ->
             match ls with
-            | (l :: ls) -> go (Value (l, gs)) ls is
+            | (l :: ls) -> go (Push :: acc) (Value (l, gs)) ls is
             | [] -> failwith "Pushed from empty local stack"
         | Pop :: is ->
             match gs with
-            | EmptyStack -> go EmptyStack (Some 0 :: ls) is
-            | UnknownStack pops -> go (UnknownStack (pops+1)) (None :: ls) is
-            | Value (v, rest) -> go rest (v :: ls) is
-        | Discard :: is
-        | OutputChar :: is
-        | OutputNumber :: is ->
+            | EmptyStack -> go (Load 0 :: acc) EmptyStack (Some 0 :: ls) is
+            | UnknownStack pops -> go (Pop :: acc) (UnknownStack (pops+1)) (None :: ls) is
+            | Value (Some x, rest) -> go (Load x :: Discard :: Pop :: acc) rest (Some x :: ls) is
+            | Value (None, rest) -> go (Pop :: acc) rest (None :: ls) is
+        | (Discard as i) :: is
+        | (OutputChar as i) :: is
+        | (OutputNumber as i) :: is ->
             match ls with
-            | (_ :: ls) -> go gs ls is
-            | [] -> failwith "Unexpected empty stack"
+            | (_ :: ls) -> go (i :: acc) gs ls is
+            | [] -> failwith (sprintf "Unexpected empty stack for %A instruction" i)
         | Clear :: is ->
             match ls with
-            | [] -> go EmptyStack ls is
+            | [] -> go (Clear :: acc) EmptyStack ls is
             | _ -> failwith "Clear with unclear local stack"
         | BinOp op :: is ->
-
             match ls with
-            | Some a :: Some b :: ls -> 
+            | Some b :: Some a :: ls -> 
                 let result = 
                     match op with
                     | Multiply -> b * a
@@ -167,22 +146,28 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
                     | Modulo -> b % a
                     | ReadText -> program.[a, b]
                     | Greater -> if b > a then 1 else 0
-                go gs (Some result :: ls) is
+                go (Load result :: Discard :: Discard :: acc) gs (Some result :: ls) is
 
             | Some 0 :: x :: ls
             | x :: Some 0 :: ls ->
                 match op with
-                | Multiply -> go gs (Some 0 :: ls) is
-                | Add -> go gs (x :: ls) is
-                | _ -> go gs (None :: ls) is
+                | Multiply -> go (Load 0 :: Discard :: Discard :: acc) gs (Some 0 :: ls) is
+                | Add ->
+                    match x with 
+                    | Some x -> go (Load x :: Discard :: Discard :: acc) gs (Some x :: ls) is
+                    | _ -> go (BinOp op :: acc) gs (None :: ls) is
+                | _ -> go (BinOp op :: acc) gs (None :: ls) is
 
             | Some 1 :: x :: ls
             | x :: Some 1 :: ls ->
                 match op with
-                | Multiply -> go gs (x :: ls) is
-                | _ -> go gs (None :: ls) is
+                | Multiply ->
+                    match x with
+                    | Some x -> go (Load x :: Discard :: Discard :: acc) gs (Some x :: ls) is
+                    | _ -> go (BinOp op :: acc) gs (None :: ls) is
+                | _ -> go (BinOp op :: acc) gs (None :: ls) is
             
-            | _ :: _ :: ls -> go gs (None :: ls) is // unknown result
+            | _ :: _ :: ls -> go (BinOp op :: acc) gs (None :: ls) is // unknown result
             | _ -> failwith "Binary operation without enough arguments on stack"
 
         | UnOp op :: is ->
@@ -192,23 +177,24 @@ let rec performStackAnalysis (program : Parser.Program) (ip, initStack) (insns, 
                     match op with
                     | Not -> if x = 0 then 1 else 0
                 
-                go gs (Some result :: ls) is
+                go (Load result :: Discard :: acc) gs (Some result :: ls) is
 
-            | _ :: ls -> go gs (None :: ls) is // unknown result
+            | None :: ls -> go (UnOp op :: acc) gs (None :: ls) is // unknown result
             | _ -> failwith "Unary operation without enough arguments on stack"
 
         | Dup :: is ->
             match ls with
-            | (v :: _) -> go gs (v :: ls) is
+            | (v :: _) -> go (Dup :: acc) gs (v :: ls) is
             | [] -> failwith "Dup with empty stack"
         | Flip :: is ->
             match ls with
-            | (x :: y :: ls) -> go gs (y :: x :: ls) is
+            | (Some x :: Some y :: ls) -> go (Load y :: Load x :: Discard :: Discard :: acc) gs (Some y :: Some x :: ls) is
+            | (x :: y :: ls) -> go (Flip :: acc) gs (y :: x :: ls) is
             | _ -> failwith "Flip without enough arguments on stack"
-        | InputChar :: is -> go gs (None :: ls) is
-        | InputNumber :: is -> go gs (None :: ls) is
+        | (InputChar as i) :: is 
+        | (InputNumber as i) :: is -> go (i :: acc) gs (None :: ls) is
 
-    go initStack [] insns
+    go [] initStack [] insns
 
 let optimizeLast fs last instructions =
     let noInstructions = List.isEmpty instructions
