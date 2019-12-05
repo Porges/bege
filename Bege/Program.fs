@@ -10,7 +10,7 @@ open Bege.Options
 
 type Arguments =
     { [<Value(0, Required = true, MetaName = "input", HelpText = "The input file (e.g. \"file.bf\").")>] input : string
-    ; [<Option('o', "output")>] output : string option
+    ; [<Option('o', "output")>] output : string
     ; [<Option('O', "optimize", Default = true)>] optimize : bool
     ; [<Option("std", Default = "befunge98")>] standard : string
     ; [<Option('v', "verbose", Default = false)>] verbose : bool
@@ -50,7 +50,7 @@ let main argv =
             | Some standard ->
                 run args.input 
                     { standard = standard
-                    ; outputFileName = args.output
+                    ; outputFileName = Some args.output
                     ; optimize = args.optimize
                     ; verbose = args.verbose
                     }
