@@ -107,11 +107,24 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
         let l2 = il.DeclareLocal(typeof<int>)
 
         let callBase (mi : MethodInfo) =
-            il.Emit(OpCodes.Ldarg_0)
-            il.Emit(OpCodes.Call, mi)
-
-        let callBaseStatic (mi : MethodInfo) =
-            il.Emit(OpCodes.Call, mi)
+            let args = mi.GetParameters().Length
+            if args = 0 then
+                il.Emit(OpCodes.Ldarg_0)
+                il.Emit(OpCodes.Call, mi)
+            elif args = 1 then
+                il.Emit(OpCodes.Stloc_0)
+                il.Emit(OpCodes.Ldarg_0)
+                il.Emit(OpCodes.Ldloc_0)
+                il.Emit(OpCodes.Call, mi)
+            elif args = 2 then
+                il.Emit(OpCodes.Stloc_1)
+                il.Emit(OpCodes.Stloc_0)
+                il.Emit(OpCodes.Ldarg_0)
+                il.Emit(OpCodes.Ldloc_0)
+                il.Emit(OpCodes.Ldloc_1)
+                il.Emit(OpCodes.Call, mi)
+            else
+                raise <| new NotSupportedException()
 
         let tailTo (mi : MethodInfo) =
             il.Emit(OpCodes.Ldarg_0)

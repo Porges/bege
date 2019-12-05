@@ -51,37 +51,47 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
         x.AddCount()
         stack.Clear()
 
-    static member Push (value : int32, x : BefungeBase) : unit =
-        x.AddCount()
-        x.Stack.Push value
+    member this.Push (value : int32) : unit =
+        this.AddCount()
+        this.Stack.Push value
 
     member x.InputChar() : int32 =
         x.AddCount()
         tr.Read()
 
-    static member OutputChar(c : int32, x : BefungeBase) : unit =
-        x.AddCount()
-        fprintf x.Writer "%c" (char(c))
+    member this.OutputChar(c : int32) : unit =
+        this.AddCount()
+        fprintf this.Writer "%c" (char(c))
 
     member x.InputNumber() : int32 =
         x.AddCount()
 
-        let mutable read = ""
         let mutable r = 0
-        while (r <- tr.Read(); r <> -1 && r <> int(' ')) do
-            read <- read + string(char(r))
 
-        match Int32.TryParse read with
-        | (true, value) -> value
-        | _ -> raise <| InvalidDataException()
+        // first, skip all non-numeric characters
+        while (r <- tr.Read(); r <> -1 && not (r >= int('0') && r <= int('9'))) do
+            () // skipping
 
-    static member ReadText(b : int32, a : int32, x : BefungeBase) : int32 =
-        x.AddCount()
-        x.Memory.[a, b]
+        if r = -1 then
+            -1
+        else
+        
+            let mutable read = string(char(r))
 
-    static member OutputNumber(v : int32, x : BefungeBase) : unit =
-        x.AddCount()
-        fprintf x.Writer "%d " v
+            while (r <- tr.Read(); r >= int('0') && r <= int('9')) do
+                read <- read + string(char(r))
+
+            match Int32.TryParse read with
+            | (true, value) -> value
+            | _ -> raise <| InvalidDataException()
+
+    member this.ReadText(b : int32, a : int32) : int32 =
+        this.AddCount()
+        this.Memory.[a, b]
+
+    member this.OutputNumber(v : int32) : unit =
+        this.AddCount()
+        fprintf this.Writer "%d " v
 
         (*
     member x.Interpret(dir, row, column) : unit =
@@ -99,7 +109,7 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
 
 
 module BaseMethods = 
-    let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Static ||| BindingFlags.Public)
+    let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
     let push = m "Push"
     let pop = m "Pop"
     let clear = m "Clear"

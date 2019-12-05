@@ -126,11 +126,11 @@ let ``clear clears whole stack`` () =
     verify "321n...@"  "" "0 0 0 "
 
 [<Theory>]
-[<InlineData("samples-factorial.bf", "1 ", "1 ")>]
-[<InlineData("samples-factorial.bf", "2 ", "2 ")>]
-[<InlineData("samples-factorial.bf", "3 ", "6 ")>]
-[<InlineData("samples-factorial.bf", "5 ", "120 ")>]
-// [<InlineData("samples-sieve.bf", "10 ", "2 ")>]
+[<InlineData("samples-factorial.bf", "1", "1 ")>]
+[<InlineData("samples-factorial.bf", "2", "2 ")>]
+[<InlineData("samples-factorial.bf", "3", "6 ")>]
+[<InlineData("samples-factorial.bf", "5", "120 ")>]
+// [<InlineData("samples-sieve.bf", "10", "2 ")>]
 // uses 'p', not supported
 [<InlineData("samples-convert.bf", "", "234 ")>]
 let sampleFiles file input output = 

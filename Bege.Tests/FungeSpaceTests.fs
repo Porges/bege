@@ -2,10 +2,13 @@
 
 open Hedgehog
 open Xunit
+open System
 
 open Bege.FungeSpace
 
-let genIndex = Gen.tuple Gen.int
+let anyInt = Gen.int (Range.constant Int32.MinValue Int32.MaxValue)
+
+let genIndex = Gen.tuple anyInt
 
 [<Fact>]
 let ``can read written value``() =
@@ -13,7 +16,7 @@ let ``can read written value``() =
 
     Property.check <| property {
         let! (x, y) = genIndex
-        let! c = Gen.int
+        let! c = anyInt
 
         fs.Item(x, y) <- c
 
@@ -40,12 +43,12 @@ let ``writing a second value does not affect the first``() =
 
     Property.check <| property {
         let! (x, y) = genIndex
-        let! c = Gen.int
+        let! c = anyInt
         fs.Item(x, y) <- c
 
         let! (x', y') = genIndex
         where (x' <> x || y' <> y) // ensure no clashes
-        let! c' = Gen.int
+        let! c' = anyInt
         fs.Item(x', y') <- c'
         
         let origC = fs.Item(x, y) 

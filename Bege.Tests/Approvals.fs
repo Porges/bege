@@ -2,7 +2,7 @@
 
 open System.Diagnostics
 open System.IO
-open System.Threading.Tasks
+open System.Threading
 
 open ApprovalTests
 open ApprovalTests.Reporters
@@ -10,8 +10,6 @@ open Xunit
 
 open Bege.Compiler
 open Bege.Options
-open System.Threading
-open System
 
 let getOutput fileName optimize =
     let code = File.ReadAllText fileName
@@ -48,20 +46,21 @@ let ``Mycology big test`` () =
 let ``Catseye tests`` () =
     let files =
         [ "beer.bf"
-        //; "befunge1.bf"
+        ; "befunge1.bf"
         ; "befunge2.bf"
-        //; "befunge3.bf"
-        //; "befunge4.bf"
-        //; "befungex.bf"
+        ; "befunge3.bf"
+        ; "befunge4.bf"
+        ; "befungex.bf"
         ; "hello.bf"
-        //; "pi.bf"
-        //; "pi2.bf"
+        ; "pi.bf"
+        ; "pi2.bf"
         ]
     
     let results = List.map (fun f -> (f, getOutput f true)) files |> dict
 
     Approvals.VerifyAll(results)
 
+[<assembly: IgnoreLineEndingsAttribute(true)>]
 [<assembly: UseReporter(typeof<ApprovalTests.Reporters.DiffReporter>)>]
 [<assembly: Namers.UseApprovalSubdirectory("approvals")>]
 do()
