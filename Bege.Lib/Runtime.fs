@@ -5,9 +5,6 @@ open System.IO
 open System.Collections.Generic
 open System.Reflection
 
-open Bege.InstructionPointer
-open Bege.Parser
-
 [<AbstractClass>]
 type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uint64) =
 
@@ -78,8 +75,9 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
         
             let mutable read = string(char(r))
 
-            while (r <- tr.Read(); r >= int('0') && r <= int('9')) do
-                read <- read + string(char(r))
+            let mutable next = 0
+            while (next <- tr.Peek(); next >= int('0') && next <= int('9')) do
+                read <- read + string(char(tr.Read()))
 
             match Int32.TryParse read with
             | (true, value) -> value

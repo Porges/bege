@@ -1,7 +1,5 @@
 ﻿module Bege.FungeSpace
 
-open System.Collections.Generic
-
 (*
  Befunge 98 space is (int32, int32)-indexed space.
 

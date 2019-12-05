@@ -1,6 +1,5 @@
 ﻿module Bege.Parser
 
-open System
 open System.IO
 
 open Bege.FungeSpace
