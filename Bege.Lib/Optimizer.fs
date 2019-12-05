@@ -1,7 +1,5 @@
 ﻿module Bege.Optimizer
 
-open System
-
 open Bege.AST
 open Bege.Common
 open Bege.InstructionPointer

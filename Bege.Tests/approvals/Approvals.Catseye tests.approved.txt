@@ -395,12 +395,7 @@ bottles of beer on the wall
 Take one down, pass it around
  no more beer...
 
-befunge1.bf => 
 befunge2.bf => BEFUNGE!EGNUFEB
-befunge3.bf => 
-befunge4.bf => 
-befungex.bf =>  
 hello.bf => Hello world!
 
 pi.bf => 3141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067
-pi2.bf => 

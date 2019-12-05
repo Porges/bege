@@ -3,15 +3,19 @@
 open Xunit
 open System.IO
 
-open Bege.Compiler
 open Bege.Options
+
+let private run options seed inS outS code =
+    let ff = Bege.Compiler.compile options code
+    let f = ff.create (inS, outS, seed)
+    f.Run() |> ignore
+    f.GetCount()
 
 let private verify code input output =
 
     for optimize in [false; true] do
         let options =
-            { outputFileName = None
-            ; optimize = optimize
+            { optimize = optimize
             ; standard = befunge98
             ; verbose = false
             }
@@ -26,8 +30,7 @@ let private verifyMode year code input output =
 
     for optimize in [false; true] do
         let options =
-            { outputFileName = None
-            ; optimize = optimize
+            { optimize = optimize
             ; standard = { befunge98 with year = year }
             ; verbose = false
             }
@@ -41,8 +44,7 @@ let private verifyMode year code input output =
 let private verifyOptimized code input output expectedInsns =
 
     let options =
-        { outputFileName = None
-        ; optimize = true
+        { optimize = true
         ; standard = befunge98
         ; verbose = false
         }

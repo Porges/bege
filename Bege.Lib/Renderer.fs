@@ -66,24 +66,11 @@ let defineMain (dynMod : ModuleBuilder) (programType : Type) : MethodInfo =
     entryPoint.CreateType() |> ignore
     entryPoint.GetMethod("Main")
 
-let saveRunnableAssembly (dynAsm : AssemblyBuilder) dynMod resultType path =
-    dynAsm.SetEntryPoint (defineMain dynMod resultType)
-    let fileName = Path.GetFileName path
-    let dir = Path.GetDirectoryName path
-    if not (String.IsNullOrEmpty dir) then Directory.CreateDirectory(dir) |> ignore
-    // AssemblyBuilder won't save directly to a path..
-    dynAsm.Save(fileName)
-    if fileName <> path
-    then File.Delete(path)
-    File.Move(fileName, path)
-
 let buildType (options : Options) (progText : string) (chains : Map<string, TypedChain<string>>, initialFunction : string) : Type =
 
-    let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave)
+    let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndCollect)
 
-    let moduleFile = Path.GetFileName <| Option.defaultValue "temp.dll" options.outputFileName
-
-    let dynMod = dynAsm.DefineDynamicModule(moduleName, moduleFile)
+    let dynMod = dynAsm.DefineDynamicModule moduleName
     let typeAttributes =
         TypeAttributes.Public |||
         TypeAttributes.Class |||
@@ -226,9 +213,6 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
     defineConstructor tb progText
 
     let result = tb.CreateType()
-
-    // if filename is given, define Main and save the assembly
-    options.outputFileName |> Option.iter (saveRunnableAssembly dynAsm dynMod result)
 
     result
 

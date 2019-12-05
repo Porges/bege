@@ -1,6 +1,5 @@
 ﻿module Bege.Compiler
 
-open Bege.Parser
 open Bege.AST
 open Bege.InstructionPointer
 open Bege.Renderer
@@ -10,7 +9,6 @@ open Bege.Options
 
 open System
 open System.IO
-open System.Text
 
 let nameFromIP { delta = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
 let nameFromIPAndStack ((ip, stack) : StateId) = sprintf "%s_%A" (nameFromIP ip) stack
@@ -29,17 +27,13 @@ let optimizeAndMapToCommonType options programText p : Map<string, TypedChain<st
         let entryPoint = nameFromIP programEntryState
         (program, entryPoint)
 
-let compile (options : Options) (text : string) : Type =
+type FungeFactory (it: Type) =
+    member _.create(input: TextReader, output: TextWriter, seed: uint64): BefungeBase =
+        Activator.CreateInstance(it, input, output, seed) :?> BefungeBase
+
+let compile (options : Options) (text : string) : FungeFactory =
     let prog = Parser.parse text
     computeChains prog options
     |> optimizeAndMapToCommonType options prog
     |> buildType options text
-
-let run prog (seed : uint64) (input : TextReader) (output : TextWriter) options =
-    let compiled = compile prog options
-    
-    let instance =
-        Activator.CreateInstance(compiled, input, output, seed)
-        :?> BefungeBase
-    
-    instance.Run()
+    |> FungeFactory

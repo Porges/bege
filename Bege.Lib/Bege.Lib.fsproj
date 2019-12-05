@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <RootNamespace>Befunge</RootNamespace>
-    <AssemblyName>Befunge</AssemblyName>
-    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <TargetFramework>netstandard21</TargetFramework>
   </PropertyGroup>
   
   <ItemGroup>
@@ -27,13 +25,8 @@
     <Compile Include="Optimizer.fs" />
     <Compile Include="Renderer.fs" />
     <Compile Include="Compiler.fs" />
-    <Compile Include="Program.fs" />
     <None Include="samples-convert.bf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
-  
-  <ItemGroup>
-    <PackageReference Include="CommandLineParser" Version="2.6.0" />
   </ItemGroup>
 </Project>

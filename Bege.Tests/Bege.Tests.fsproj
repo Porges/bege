@@ -1,13 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>Bege.Tests</RootNamespace>
-    <AssemblyName>Bege.Tests</AssemblyName>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>netcoreapp31</TargetFramework>
   </PropertyGroup>
   
   <ItemGroup>
-    <None Include="Script.fsx" />
     <Compile Include="Tests.fs" />
     <Compile Include="FungeSpaceTests.fs" />
     <Compile Include="Approvals.fs" />
@@ -66,8 +63,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.4.0" />
     <PackageReference Include="coverlet.collector" Version="1.0.1" />
   </ItemGroup>
-
+  
   <ItemGroup>
-    <ProjectReference Include="..\Bege\Bege.fsproj" />
+    <ProjectReference Include="..\Bege.Lib\Bege.Lib.fsproj" />
   </ItemGroup>
 </Project>

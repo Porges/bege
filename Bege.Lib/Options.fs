@@ -30,6 +30,5 @@ let befunge98 = { topology = Befunge; year = 98 }
 type Options =
     { standard : Standard
     ; optimize : bool
-    ; outputFileName : string option
     ; verbose : bool
     }
