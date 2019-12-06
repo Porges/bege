@@ -27,9 +27,11 @@ type Instruction =
     | BinOp of BinOp
     | UnOp of UnOp
 
-module LastInstruction =
+[<AutoOpen>]
+module Control =
 
-    type LastInstruction<'a when 'a : comparison> =
+    [<RequireQualifiedAccess>]
+    type Control<'a when 'a : comparison> =
         private
         | Exit
         | ToState of next : 'a
@@ -37,29 +39,29 @@ module LastInstruction =
         | Rand of 'a list
 
     let (|Exit|ToState|Branch|Rand|) = function
-        | Exit -> Exit
-        | ToState n -> ToState n
-        | Branch (z, nz) -> Branch (z, nz)
-        | Rand ts -> Rand ts
+        | Control.Exit -> Exit
+        | Control.ToState n -> ToState n
+        | Control.Branch (z, nz) -> Branch (z, nz)
+        | Control.Rand ts -> Rand ts
 
-    let exit = Exit
-    let toState = ToState
-    let branch z nz = Branch (z, nz)
-    let rand<'a when 'a : comparison> (ts : IEnumerable<'a>) = 
+    let Exit = Control.Exit
+    let ToState = Control.ToState
+    let Branch z nz = Control.Branch (z, nz)
+    let Rand<'a when 'a : comparison> (ts : IEnumerable<'a>) = 
         let dts = ts.Distinct().ToList()
         dts.Sort()
-        Rand (List.ofSeq dts)
+        Control.Rand (List.ofSeq dts)
 
     // LastInstruction is a functor
     let map f = function
-        | Exit -> exit
-        | ToState t -> toState (f t)
-        | Branch (z, nz) -> branch (f z) (f nz)
-        | Rand ts -> rand (ts.Select(f))
+        | Exit -> Exit
+        | ToState t -> ToState (f t)
+        | Branch (z, nz) -> Branch (f z) (f nz)
+        | Rand ts -> Rand (ts.Select(f))
 
-open LastInstruction
+open Control
 
-type Chain<'a when 'a : comparison> = Instruction list * LastInstruction<'a>
+type Chain<'a when 'a : comparison> = { instructions: Instruction list; control: Control<'a> }
 type Program<'a when 'a : comparison> = Map<'a, Chain<'a>>
 
 let computeChains (prog : Parser.Program) (options : Options) : Program<InstructionPointer.State> =
@@ -83,21 +85,21 @@ let computeChains (prog : Parser.Program) (options : Options) : Program<Instruct
 
     let read (struct (x, y)) = prog.[x, y]
 
-    let rec follow chain (ip : InstructionPointer.State) : Chain<InstructionPointer.State> = 
+    let rec follow instructions (ip : InstructionPointer.State) : Chain<InstructionPointer.State> = 
 
-        let go x = follow (x :: chain) (advance ip)
+        let go x = follow (x :: instructions) (advance ip)
 
-        let branchChain(delta) =
+        let branchChain delta =
             let next = advance { ip with delta = delta }
             toVisit next
             next
 
-        let endChain x = (List.rev chain, x)
+        let endChain c = { instructions = List.rev instructions; control = c }
 
         let newChain delta = 
             let next = advance { ip with delta = delta }
             toVisit next
-            endChain (toState next)
+            endChain (ToState next)
             
         match char (read ip.position) with
         | '>' -> newChain Dir.right
@@ -107,10 +109,10 @@ let computeChains (prog : Parser.Program) (options : Options) : Program<Instruct
         | d when d >= '0' && d <= '9' -> go (Load (int(d) - int('0')))
         | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go (Load (int(h) - int('a') + 10))
         | '$' -> go Discard
-        | ' ' -> follow chain (advance ip)
-        | '#' -> follow chain (advance (advance ip))
-        | '"' -> readString chain (advance ip)
-        | '@' -> endChain exit
+        | ' ' -> follow instructions (advance ip)
+        | '#' -> follow instructions (advance (advance ip))
+        | '"' -> readString instructions (advance ip)
+        | '@' -> endChain Exit
         | '~' -> go InputChar
         | '&' -> go InputNumber 
         | ':' -> go Dup
@@ -118,17 +120,17 @@ let computeChains (prog : Parser.Program) (options : Options) : Program<Instruct
         | '.' -> go OutputNumber
         | ',' -> go OutputChar
         | '!' -> go (UnOp Not)
-        | '?' -> endChain (rand [branchChain Dir.left; branchChain Dir.right; branchChain Dir.up; branchChain Dir.down])
+        | '?' -> endChain (Rand [branchChain Dir.left; branchChain Dir.right; branchChain Dir.up; branchChain Dir.down])
         | '+' -> go (BinOp Add)
         | '-' -> go (BinOp Subtract)
         | '/' -> go (BinOp Divide)
         | '%' -> go (BinOp Modulo)
         | '*' -> go (BinOp Multiply)
-        | '_' -> endChain (branch (branchChain Dir.right) (branchChain Dir.left))
-        | '|' -> endChain (branch (branchChain Dir.down) (branchChain Dir.up))
+        | '_' -> endChain (Branch (branchChain Dir.right) (branchChain Dir.left))
+        | '|' -> endChain (Branch (branchChain Dir.down) (branchChain Dir.up))
         | '`' -> go (BinOp Greater)
         | 'g' -> go (BinOp ReadText)
-        | ';' -> checkYear 98 ';'; readComment chain (advance ip)
+        | ';' -> checkYear 98 ';'; readComment instructions (advance ip)
         | 'n' -> checkYear 98 'n'; go Clear
         | c -> 
             if options.standard.year = 93

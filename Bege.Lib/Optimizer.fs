@@ -1,7 +1,6 @@
 ﻿module Bege.Optimizer
 
 open Bege.AST
-open Bege.AST.LastInstruction
 open Bege.Common
 open Bege.InstructionPointer
 open Bege.Options
@@ -47,11 +46,7 @@ let dup stk =
 type StackBehaviour = int * int
 type StateId = InstructionPointer.State * Stack
 
-type TypedChain<'a when 'a : comparison> =
-    { instructions : Instruction list
-    ; stackBehaviour : StackBehaviour
-    ; lastInstruction  : LastInstruction<'a>
-    }
+type TypedChain<'a when 'a : comparison> = { chain: Chain<'a>; behaviour: StackBehaviour }
 
 type TypedProgram = Map<StateId, TypedChain<StateId>>
 
@@ -64,7 +59,7 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
     let countReferences m =
             m |> Map.fold (fun cs _ c ->
-                match c.lastInstruction with
+                match c.chain.control with
                 | Exit -> cs
                 | Branch (l, r) -> inc l (inc r cs)
                 | Rand targets -> Seq.fold (fun cs x -> inc x cs) cs targets
@@ -77,33 +72,34 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
     let isJump fs =
         match program.[fs] with
-        | { instructions = []; lastInstruction = ToState t } -> true
+        | { chain = { instructions = []; control = ToState _ } } -> true
         | _ -> false
 
     let target fs =
         match program.[fs] with
-        | { instructions = []; lastInstruction = ToState t } -> t
+        | { chain = { instructions = []; control = ToState t } } -> t
         | _ -> failwith "target must be guarded by isJump"
 
     let result =
         program
         |> Map.map (fun fs c ->
-            match c.lastInstruction with
+            match c.chain.control with
             | ToState n when canBeInlined n || isJump n ->
                 // if options.verbose then printfn "Inlining %A into %A" n fs
                 let targetChain = program.[n]
-                { instructions = (List.append c.instructions targetChain.instructions)
-                ; lastInstruction = targetChain.lastInstruction
-                ; stackBehaviour = c.stackBehaviour // TODO: this is wrong!
+                { chain =
+                    { instructions = (List.append c.chain.instructions targetChain.chain.instructions)
+                    ; control = targetChain.chain.control }
+                ; behaviour = c.behaviour // TODO: this is wrong!
                 }
             | Branch (z, nz) when isJump z || isJump nz ->
                 let z = if isJump z then target z else z
                 let nz = if isJump nz then target nz else nz
-                { c with lastInstruction = branch z nz }
+                { c with chain = { c.chain with control = Branch z nz } }
             | Rand targets
                 when targets.Any(fun x -> isJump x) ->
                 let newTargets = Seq.map (fun x -> if isJump x then target x else x) targets
-                { c with lastInstruction = rand newTargets }
+                { c with chain = { c.chain with control = Rand newTargets } }
             | _ ->  c)
 
     let newCounts = countReferences result
@@ -118,23 +114,26 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
     trimmedResult
 
-let rec peepholeOptimize = function
-    // dead loads
-    | Load _ :: Discard :: is -> peepholeOptimize is
-    | BinOp (ReadText _) :: Discard :: is -> Discard :: Discard :: peepholeOptimize is
-    // unneeded discards
-    | Discard :: Clear :: is -> Clear :: peepholeOptimize is
-    | Clear :: Clear :: is -> Clear :: peepholeOptimize is
-    // eliminate unneeded nots
-    | UnOp Not :: UnOp Not :: is -> peepholeOptimize is
-    // eliminate unneeded flips
-    | Flip :: Flip :: is -> peepholeOptimize is
-    | Dup :: Flip :: is -> Dup :: peepholeOptimize is
-    // eliminated unneeded dups
-    | Dup :: Discard :: is -> peepholeOptimize is
+let peepholeOptimize (c: Chain<_>): Chain<_> =
+    let rec go = function
+        // dead loads
+        | Load _ :: Discard :: is -> go is
+        | BinOp (ReadText _) :: Discard :: is -> Discard :: Discard :: go is
+        // unneeded discards
+        | Discard :: Clear :: is -> Clear :: go is
+        | Clear :: Clear :: is -> Clear :: go is
+        // eliminate unneeded nots
+        | UnOp Not :: UnOp Not :: is -> go is
+        // eliminate unneeded flips
+        | Flip :: Flip :: is -> go is
+        | Dup :: Flip :: is -> Dup :: go is
+        // eliminated unneeded dups
+        | Dup :: Discard :: is -> go is
 
-    | i :: is -> i :: peepholeOptimize is
-    | [] -> []
+        | i :: is -> i :: go is
+        | [] -> []
+
+    { c with instructions = go c.instructions }
 
 type EventualFate = Pushed | Consumed | Discarded
 
@@ -154,11 +153,11 @@ let stackBehaviour: Instruction -> StackBehaviour = function
 
 /// Figures out the eventual fate for a value that
 /// was just pushed onto the stack:
-let eventualFate lastInstruction instructions =
+let eventualFate (c: Chain<'a>): EventualFate =
     /// `st` = number of items on stack above the value.
     let rec eventualFateLocal st = function
         | [] ->
-            match lastInstruction with
+            match c.control with
             | Exit -> Discarded // all values dropped on exit
             | Branch _ when st = 0 -> Consumed 
             | _ -> Pushed
@@ -173,12 +172,12 @@ let eventualFate lastInstruction instructions =
                 else Consumed
             else eventualFateLocal (st + pushed) is
 
-    eventualFateLocal 0 instructions
+    eventualFateLocal 0 c.instructions
 
-let rec performStackAnalysis
+let performStackAnalysis
     (program : Parser.Program)
     ((_, initStack) : StateId)
-    ((insns, last) : Chain<StateId>): TypedChain<StateId> =
+    ({instructions=instructions; control=control} : Chain<StateId>): TypedChain<StateId> =
 
     // acc = instruction acculuator
     // stk = stack
@@ -187,26 +186,25 @@ let rec performStackAnalysis
         | [] ->
             let rec finale wrote = function
                 | Push (KillDiscard, rest) ->
-                    match last with
+                    match control with
                     | Exit -> finale wrote rest // really this needs to check that all rest are killed
                     | _ -> failwith "KillDiscard left on stack"
 
                 | Push (_, rest) -> finale (wrote+1) rest
 
                 | EmptyStack ->
-                    let (insns, lastInsn) =
+                    let (instructions, control) =
                         if wrote = 0
                         // we know it's empty so we can propagate that information
                         // to the next chain.
-                        then (List.rev acc, LastInstruction.map (fun (ip, _) -> (ip, EmptyStack)) last)
-                        else (List.rev acc, LastInstruction.map (fun (ip, _) -> (ip, UnknownStack)) last)
+                        then (List.rev acc, Control.map (fun (ip, _) -> (ip, EmptyStack)) control)
+                        else (List.rev acc, Control.map (fun (ip, _) -> (ip, UnknownStack)) control)
 
                     //if read <> 0
                     //then failwith "Logic problem - claiming read values for known empty stack"
 
-                    { instructions = insns
-                    ; lastInstruction = lastInsn
-                    ; stackBehaviour = (read, wrote)
+                    { chain = { instructions = instructions; control = control }
+                    ; behaviour = (read, wrote)
                     }
 
                 | UnknownStack ->
@@ -219,14 +217,13 @@ let rec performStackAnalysis
                     //    if not (List.isEmpty stk)
                     //    then failwith "Function ended with non-empty local stack"
 
-                    { instructions = List.rev acc
-                    ; lastInstruction = last
-                    ; stackBehaviour = (read, wrote)
+                    { chain = { instructions = List.rev acc; control = control }
+                    ; behaviour = (read, wrote)
                     }
 
             finale 0 stk
         | Load k :: is ->
-            match eventualFate last is with
+            match eventualFate {instructions = is; control = control} with
             | Discarded -> go acc read (push stk KillDiscard) is
             | _ -> go (Load k :: acc) read (push stk (Known k)) is
 
@@ -302,41 +299,41 @@ let rec performStackAnalysis
         | (InputChar as i) :: is
         | (InputNumber as i) :: is -> go (i :: acc) read (push stk Unknown) is
 
-    go [] 0 initStack insns
+    go [] 0 initStack instructions
 
-let optimizeLast fs last instructions =
-    let noInstructions = List.isEmpty instructions
-
-    match last with
+let optimizeControl fs (c: Chain<'a>) =
+    match c.control with
     // identical branches - change to unconditional jump
-    // we must add Discard to get rid of the existing Pop
-    | Branch (l, r) when l = r -> (List.append instructions [Discard], toState r)
+    // we must add Discard to have the same stack behaviour
+    | Branch (l, r) when l = r ->
+        { instructions = List.append c.instructions [Discard]
+        ; control = ToState r }
 
     // Rand with only a single distinct target must jump to it:
-    | Rand [t] -> (instructions, toState t)
+    | Rand [t] -> { c with control = ToState t }
 
     // Rand that loops back to same function must eventually branch to another,
     // so if there are no instructions in this function we could just jump instead:
     | Rand [t1; t2] as r
-        when noInstructions 
+        when List.isEmpty c.instructions 
         -> 
             if fs = t1 
-            then (instructions, toState t2)
+            then { c with control = ToState t2 }
             elif fs = t2
-            then (instructions, toState t1)
-            else (instructions, r)
+            then { c with control = ToState t1 }
+            else c
 
-    | c -> (instructions, c)
+    | _ -> c
 
-let optimizeChain program stateId (chain : TypedChain<StateId>) =
-    fix peepholeOptimize chain.instructions
-    |> optimizeLast stateId chain.lastInstruction
+let optimizeChain program stateId (tc : TypedChain<StateId>) =
+    tc.chain
+    |> fix peepholeOptimize
+    |> optimizeControl stateId
     |> performStackAnalysis program stateId
-    |> fun x -> { x with instructions = fix peepholeOptimize x.instructions } // TODO why is this needed
-
+    
 /// performStackAnalysis can add references to "specializations"
 /// that don't exist yet. This function creates them.
-let instantiateSpecializations program =
+let instantiateSpecializations (program: TypedProgram): TypedProgram =
     // copy the existing one with "default" stack if it doesn't already exist
     let copyIfNotExists ((ip, _) as state) m =
         if not (Map.containsKey state m)
@@ -344,7 +341,7 @@ let instantiateSpecializations program =
         else m
 
     Map.fold (fun m k c ->
-        match c.lastInstruction with
+        match c.chain.control with
         | ToState t -> copyIfNotExists t m
         | Branch (z, nz) -> copyIfNotExists z (copyIfNotExists nz m)
         | Rand ts -> Seq.fold (fun m t -> copyIfNotExists t m) m ts
@@ -356,14 +353,13 @@ let optimizeChains programText (program : TypedProgram) : TypedProgram =
     instantiateSpecializations newProgram
 
 // TODO: update to work with new types
-let collapseIdenticalChains (m : Map<InstructionPointer.State, Instruction list * LastInstruction<InstructionPointer.State>>)
-    : Map<InstructionPointer.State, Instruction list * LastInstruction<InstructionPointer.State>> =
+let collapseIdenticalChains (m : Map<_, TypedChain<_>>): Map<_, TypedChain<_>> =
 
     // invert the map, now all states with the same instruction list are in the same slot
     let inverted = invertMap m
 
     // pick one state to represent the others (the 'minimum')
-    let newMappings : Map<InstructionPointer.State, InstructionPointer.State> =
+    let newMappings : Map<_, _> =
         Map.fold (fun m _ fss ->
             let min = List.min fss in
             List.fold (fun m fs -> Map.add fs min m) m fss) Map.empty inverted
@@ -371,14 +367,14 @@ let collapseIdenticalChains (m : Map<InstructionPointer.State, Instruction list 
     // rewrite all the last-instructions to remap their states
     inverted
     |> Map.toSeq
-    |> Seq.map (fun ((is, last), fss) ->
-        let newLast =
-            match last with
-            | Exit -> exit
-            | Branch (one, two) -> branch newMappings.[one] newMappings.[two]
-            | Rand targets -> rand (Seq.map (fun x -> newMappings.[x]) targets)
-            | ToState n -> toState (newMappings.[n])
-        (List.min fss, (is, newLast)))
+    |> Seq.map (fun ({ chain = { control = control } } as tc, fss) ->
+        let newControl =
+            match control with
+            | Exit -> Exit
+            | Branch (one, two) -> Branch newMappings.[one] newMappings.[two]
+            | Rand targets -> Rand (Seq.map (fun x -> newMappings.[x]) targets)
+            | ToState n -> ToState (newMappings.[n])
+        (List.min fss, { tc with chain = { tc.chain with control = newControl } }))
     |> Map.ofSeq
 
 let optimize (options : Options) (programText : Parser.Program) (chains : Program<InstructionPointer.State>)
@@ -392,9 +388,9 @@ let optimize (options : Options) (programText : Parser.Program) (chains : Progra
                 then EmptyStack
                 else UnknownStack
 
-            let typedChain = performStackAnalysis programText (ipState, stack) (v |> (fun (c, last) -> (c, LastInstruction.map (fun i -> (i, UnknownStack)) last)))
+            let typedChain = performStackAnalysis programText (ipState, stack) (v |> (fun c -> { instructions = c.instructions; control = Control.map (fun i -> (i, UnknownStack)) c.control }))
 
-            if options.verbose then printfn "%A has stack behaviour %A" (ipState, stack) typedChain.stackBehaviour
+            if options.verbose then printfn "%A has stack behaviour %A" (ipState, stack) typedChain.behaviour
 
             Map.add (ipState, stack) typedChain m)
             Map.empty

@@ -1,4 +1,4 @@
-﻿module Approvals
+﻿module Bege.Tests.Approval
 
 open System
 open System.IO

@@ -5,6 +5,7 @@
   </PropertyGroup>
   
   <ItemGroup>
+    <Compile Include="Optimizer.fs" />
     <Compile Include="Tests.fs" />
     <Compile Include="FungeSpaceTests.fs" />
     <Compile Include="Approvals.fs" />

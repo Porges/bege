@@ -1,4 +1,4 @@
-﻿module FungeSpaceTests
+﻿module Bege.Tests.FungeSpace
 
 open Hedgehog
 open Xunit

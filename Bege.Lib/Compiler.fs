@@ -12,8 +12,11 @@ open System.IO
 
 let private nameFromIP { delta = d; position = struct (x, y) } = sprintf "%A_%d_%d" d x y
 let private nameFromIPAndStack ((ip, stack) : StateId) = sprintf "%s_%A" (nameFromIP ip) stack
-// boo, `with` can't change generic type!
-let private updateInstructions f c = { instructions = c.instructions; lastInstruction = LastInstruction.map f c.lastInstruction; stackBehaviour = c.stackBehaviour }
+// boo, `with` can't change generic type, so we have to write out the whole thing
+let private updateInstructions f c =
+    { chain = { instructions = c.chain.instructions; control = Control.map f c.chain.control }
+    ; behaviour = c.behaviour }
+
 let private mapKV kf vf m = Map.fold (fun m k v -> Map.add (kf k) (vf v) m) Map.empty m
 
 let private optimizeAndMapToCommonType options programText p : Map<string, TypedChain<string>> * string =
@@ -23,7 +26,7 @@ let private optimizeAndMapToCommonType options programText p : Map<string, Typed
         let entryPoint = nameFromIPAndStack (programEntryState, EmptyStack)
         (program, entryPoint)
     else
-        let program = p |> mapKV nameFromIP (fun v -> { instructions = fst v; lastInstruction = LastInstruction.map nameFromIP (snd v); stackBehaviour = (0,0) })
+        let program = p |> mapKV nameFromIP (fun v -> { chain = { instructions = v.instructions; control = Control.map nameFromIP v.control }; behaviour = (0,0) })
         let entryPoint = nameFromIP programEntryState
         (program, entryPoint)
 

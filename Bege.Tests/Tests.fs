@@ -1,4 +1,4 @@
-﻿module Bege.Tests
+﻿module Bege.Tests.Simple
 
 open Xunit
 open System.IO

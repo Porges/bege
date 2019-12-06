@@ -6,7 +6,6 @@ open System.Reflection
 open System.Reflection.Emit
 
 open Bege.AST
-open Bege.AST.LastInstruction
 open Bege.Optimizer
 open Bege.Options
 open Bege.Runtime
@@ -82,13 +81,13 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
 
     let definedMethods =
         chains |> Map.map (fun name chain ->
-            let args = fst chain.stackBehaviour
+            let args = fst chain.behaviour
             if options.verbose then printfn "Defining %s (%d args)" name args
             let args = Array.replicate 0 (* TODO: args *) typeof<int>
             let method = tb.DefineMethod(name, MethodAttributes.Private, typeof<Void>, args)
             (method, chain))
 
-    let buildMethod (method : MethodBuilder, c) =
+    let buildMethod (method : MethodBuilder, tc: TypedChain<_>) =
         // printfn "Emitting method: %s" (nameFromState fs)
         let il = method.GetILGenerator()
         let l1 = il.DeclareLocal(typeof<int>)
@@ -205,7 +204,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
                     il.Emit(OpCodes.Ceq)
                 push()
 
-        let emitLast = function
+        let emitControl = function
             | Rand targets ->
                 let methods =
                     targets
@@ -227,13 +226,15 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
                 tailTo nzMethod
                 il.MarkLabel(zeroTarget)
                 tailTo zMethod
+
             | Exit -> il.Emit(OpCodes.Ret)
+
             | ToState n ->
                 let (nMethod, _) = definedMethods.[n]
                 tailTo nMethod
 
-        List.iter emit c.instructions
-        emitLast c.lastInstruction
+        List.iter emit tc.chain.instructions
+        emitControl tc.chain.control
 
     Map.iter (fun _ m -> buildMethod m) definedMethods
 
