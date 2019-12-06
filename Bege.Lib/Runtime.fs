@@ -4,64 +4,52 @@ open System
 open System.IO
 open System.Collections.Generic
 open System.Reflection
+open System.Text
 
 [<AbstractClass>]
-type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uint64) =
+type Funge(tr : TextReader, tw : TextWriter, progText : string, seed : uint64) =
 
-    let fungeSpace = Parser.parse progText
+    let memory = Parser.parse progText
     let stack = Stack<int>()
+
     let mutable lcg = LCG.createKnuth seed
     let mutable count = 0
 
-    new(progText : string) = BefungeBase(Console.In, Console.Out, progText, uint64(Guid.NewGuid().GetHashCode()))
+    let addCount(): unit = count <- count + 1
+
+    new(progText : string) = Funge(Console.In, Console.Out, progText, uint64(Guid.NewGuid().GetHashCode()))
 
     abstract member Run : unit -> int
 
-    member x.Memory
-        with get() = fungeSpace
+    member _.GetCount() = count 
 
-    member x.Reader
-        with get() = tr
-
-    member x.Writer
-        with get() = tw
-    
-    member x.Stack
-        with get() = stack
-
-    member x.AddCount() : unit =
-        count <- count + 1
-
-    member x.GetCount() =
-        count
-
-    member x.Rand() : int =
-        x.AddCount()
+    member _.Rand() : int =
+        addCount()
         lcg <- LCG.next lcg
         int (LCG.bits 2 lcg)
 
-    member x.Pop() =
-        x.AddCount()
+    member _.Pop() =
+        addCount()
         if stack.Count > 0 then stack.Pop() else 0
 
-    member x.Clear() =
-        x.AddCount()
+    member _.Clear() =
+        addCount()
         stack.Clear()
 
-    member this.Push (value : int32) : unit =
-        this.AddCount()
-        this.Stack.Push value
+    member _.Push (value : int32) : unit =
+        addCount()
+        stack.Push value
 
-    member x.InputChar() : int32 =
-        x.AddCount()
+    member _.InputChar() : int32 =
+        addCount()
         tr.Read()
 
-    member this.OutputChar(c : int32) : unit =
-        this.AddCount()
-        fprintf this.Writer "%c" (char(c))
+    member _.OutputChar(c : int32) : unit =
+        addCount()
+        tw.Write(char(c))
 
-    member x.InputNumber() : int32 =
-        x.AddCount()
+    member _.InputNumber() : int32 =
+        addCount()
 
         let mutable r = 0
 
@@ -70,26 +58,28 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
             () // skipping
 
         if r = -1 then
-            -1
+            -1 // EOF
         else
         
-            let mutable read = string(char(r))
+            let read = StringBuilder()
+            read.Append(char(r)) |> ignore
 
             let mutable next = 0
             while (next <- tr.Peek(); next >= int('0') && next <= int('9')) do
-                read <- read + string(char(tr.Read()))
+                read.Append(char(tr.Read())) |> ignore
 
-            match Int32.TryParse read with
+            match Int32.TryParse (read.ToString()) with
             | (true, value) -> value
             | _ -> raise <| InvalidDataException()
 
-    member this.ReadText(b : int32, a : int32) : int32 =
-        this.AddCount()
-        this.Memory.[a, b]
+    member _.ReadText(b : int32, a : int32) : int32 =
+        addCount()
+        memory.[a, b]
 
-    member this.OutputNumber(v : int32) : unit =
-        this.AddCount()
-        fprintf this.Writer "%d " v
+    member _.OutputNumber(v : int32) : unit =
+        addCount()
+        tw.Write(v)
+        tw.Write(' ')
 
         (*
     member x.Interpret(dir, row, column) : unit =
@@ -107,7 +97,7 @@ type BefungeBase(tr : TextReader, tw : TextWriter, progText : string, seed : uin
 
 
 module BaseMethods = 
-    let private m n = typeof<BefungeBase>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
+    let private m n = typeof<Funge>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
     let push = m "Push"
     let pop = m "Pop"
     let clear = m "Clear"
@@ -117,6 +107,6 @@ module BaseMethods =
     let outputNumber = m "OutputNumber"
     let readText = m "ReadText"
     let rand = m "Rand"
-    let ctor = typeof<BefungeBase>.GetConstructor([| typeof<TextReader>; typeof<TextWriter>; typeof<string>; typeof<uint64> |])
-    let easyCtor = typeof<BefungeBase>.GetConstructor([| typeof<string> |])
+    let ctor = typeof<Funge>.GetConstructor([| typeof<TextReader>; typeof<TextWriter>; typeof<string>; typeof<uint64> |])
+    let easyCtor = typeof<Funge>.GetConstructor([| typeof<string> |])
     let count = m "GetCount"

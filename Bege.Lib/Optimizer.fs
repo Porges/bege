@@ -1,9 +1,13 @@
 ﻿module Bege.Optimizer
 
 open Bege.AST
+open Bege.AST.LastInstruction
 open Bege.Common
 open Bege.InstructionPointer
 open Bege.Options
+
+open System.Linq
+open System.Collections.Generic
 
 type StackValue =
     /// A value that is statically known.
@@ -22,9 +26,9 @@ type Stack
 /// How many items the chain pops, and how many it stores.
 type StackBehaviour = int * int
 type LocalStack = StackValue list
-type StateId = IPState * Stack
+type StateId = InstructionPointer.State * Stack
 
-type TypedChain<'a> =
+type TypedChain<'a when 'a : comparison> =
     { instructions : Instruction list
     ; stackBehaviour : StackBehaviour
     ; lastInstruction  : LastInstruction<'a>
@@ -44,7 +48,7 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
                 match c.lastInstruction with
                 | Exit -> cs
                 | Branch (l, r) -> inc l (inc r cs)
-                | Rand targets -> List.fold (fun cs x -> inc x cs) cs targets
+                | Rand targets -> Seq.fold (fun cs x -> inc x cs) cs targets
                 | ToState n -> inc n cs) Map.empty
 
     let counts = countReferences program
@@ -76,11 +80,11 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
             | Branch (z, nz) when isJump z || isJump nz ->
                 let z = if isJump z then target z else z
                 let nz = if isJump nz then target nz else nz
-                { c with lastInstruction = Branch (z, nz) }
+                { c with lastInstruction = branch z nz }
             | Rand targets
-                when List.exists isJump targets ->
-                let newTargets = List.map (fun x -> if isJump x then target x else x) targets
-                { c with lastInstruction = Rand (List.sort newTargets) }
+                when targets.Any(fun x -> isJump x) ->
+                let newTargets = Seq.map (fun x -> if isJump x then target x else x) targets
+                { c with lastInstruction = rand newTargets }
             | _ ->  c)
 
     let newCounts = countReferences result
@@ -317,24 +321,21 @@ let optimizeLast fs last instructions =
     match last with
     // identical branches - change to unconditional jump
     // we must add Discard to get rid of the existing Pop
-    | Branch (l, r) when l = r -> (List.append instructions [Discard], ToState r)
+    | Branch (l, r) when l = r -> (List.append instructions [Discard], toState r)
 
-    // TODO: update these patterns to deal with N cases
-    // Rand with all identical:
-    | Rand [a; b; c; d] when a = b && b = c && c = d -> (instructions, ToState d)
+    // Rand with only a single distinct target must jump to it:
+    | Rand [t] -> (instructions, toState t)
 
     // Rand that loops back to same function must eventually branch to another,
-    // so if there are no instructions in this function we could just jump instead.
-    //
-    // There are two orders to check here - since Rand is always ordered (via ord4),
-    // either fs < all or fs > all:
-    | Rand [a; b; c; d] when noInstructions && a = fs && b = c && c = d -> (instructions, ToState d)
-    | Rand [a; b; c; d] when noInstructions && a = fs && b = fs && c = d -> (instructions, ToState d)
-    | Rand [a; b; c; d] when noInstructions && a = fs && b = fs && c = fs -> (instructions, ToState d)
-
-    | Rand [a; b; c; d] when noInstructions && a = b && b = c && d = fs -> (instructions, ToState a)
-    | Rand [a; b; c; d] when noInstructions && a = b && c = fs && d = fs -> (instructions, ToState a)
-    | Rand [a; b; c; d] when noInstructions && b = fs && c = fs && d = fs -> (instructions, ToState a)
+    // so if there are no instructions in this function we could just jump instead:
+    | Rand [t1; t2] as r
+        when noInstructions 
+        -> 
+            if fs = t1 
+            then (instructions, toState t2)
+            elif fs = t2
+            then (instructions, toState t1)
+            else (instructions, r)
 
     | c -> (instructions, c)
 
@@ -356,7 +357,7 @@ let instantiateSpecializations program =
         match c.lastInstruction with
         | ToState t -> copyIfNotExists t m
         | Branch (z, nz) -> copyIfNotExists z (copyIfNotExists nz m)
-        | Rand ts -> List.fold (fun m t -> copyIfNotExists t m) m ts
+        | Rand ts -> Seq.fold (fun m t -> copyIfNotExists t m) m ts
         | Exit -> m
         ) program program
 
@@ -365,13 +366,14 @@ let optimizeChains programText (program : TypedProgram) : TypedProgram =
     instantiateSpecializations newProgram
 
 // TODO: update to work with new types
-let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction<IPState>>) : Map<IPState, Instruction list * LastInstruction<IPState>> =
+let collapseIdenticalChains (m : Map<InstructionPointer.State, Instruction list * LastInstruction<InstructionPointer.State>>)
+    : Map<InstructionPointer.State, Instruction list * LastInstruction<InstructionPointer.State>> =
 
     // invert the map, now all states with the same instruction list are in the same slot
     let inverted = invertMap m
 
     // pick one state to represent the others (the 'minimum')
-    let newMappings : Map<IPState, IPState> =
+    let newMappings : Map<InstructionPointer.State, InstructionPointer.State> =
         Map.fold (fun m _ fss ->
             let min = List.min fss in
             List.fold (fun m fs -> Map.add fs min m) m fss) Map.empty inverted
@@ -382,17 +384,17 @@ let collapseIdenticalChains (m : Map<IPState, Instruction list * LastInstruction
     |> Seq.map (fun ((is, last), fss) ->
         let newLast =
             match last with
-            | Exit -> Exit
-            | Branch (one, two) -> Branch (newMappings.[one], newMappings.[two])
-            | Rand targets -> Rand (List.sort (List.map (fun x -> newMappings.[x]) targets))
-            | ToState n -> ToState (newMappings.[n])
+            | Exit -> exit
+            | Branch (one, two) -> branch newMappings.[one] newMappings.[two]
+            | Rand targets -> rand (Seq.map (fun x -> newMappings.[x]) targets)
+            | ToState n -> toState (newMappings.[n])
         (List.min fss, (is, newLast)))
     |> Map.ofSeq
 
-let augmentChain ((is, last) : Chain<IPState>) : Chain<StateId> =
+let augmentChain ((is, last) : Chain<InstructionPointer.State>) : Chain<StateId> =
     (is, LastInstruction.map (fun ipState -> (ipState, UnknownStack)) last)
 
-let optimize (options : Options) (programText : Parser.Program) (chains : Program<IPState>)
+let optimize (options : Options) (programText : Parser.Program) (chains : Program<InstructionPointer.State>)
     : TypedProgram =
 
     // add initial types (stack behaviours) to the program

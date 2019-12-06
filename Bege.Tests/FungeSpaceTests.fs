@@ -4,7 +4,7 @@ open Hedgehog
 open Xunit
 open System
 
-open Bege.FungeSpace
+open Bege
 
 let anyInt = Gen.int (Range.constant Int32.MinValue Int32.MaxValue)
 
@@ -12,7 +12,7 @@ let genIndex = Gen.tuple anyInt
 
 [<Fact>]
 let ``can read written value``() =
-    let fs = Funge98Space()
+    let fs = BefungeSpace ()
 
     Property.check <| property {
         let! (x, y) = genIndex
@@ -28,7 +28,7 @@ let ``can read written value``() =
 
 [<Fact>]
 let ``default value is space``() =
-    let fs = Funge98Space()
+    let fs = BefungeSpace ()
 
     Property.check <| property {
         let! (x, y) = genIndex
@@ -39,7 +39,7 @@ let ``default value is space``() =
 
 [<Fact>]
 let ``writing a second value does not affect the first``() =
-    let fs = Funge98Space()
+    let fs = BefungeSpace ()
 
     Property.check <| property {
         let! (x, y) = genIndex
@@ -57,7 +57,7 @@ let ``writing a second value does not affect the first``() =
 
 [<Fact>]
 let ``can write a 256x256 block and read it back`` () =
-    let fs = Funge98Space()
+    let fs = BefungeSpace ()
 
     let value i j = i * 256 + j
 

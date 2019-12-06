@@ -16,12 +16,12 @@ module Dir =
 
 /// Instruction pointer state
 [<StructuredFormatDisplay("{delta} {position}")>]
-type [<Struct>] IPState = { position : Position; delta : Delta }
+type [<Struct>] State = { position : Position; delta : Delta }
 
 /// Initial pointer state
 let programEntryState = { position = struct (0,0); delta = Dir.right }
 
-let advance (ip : IPState) = 
+let advance (ip : State) = 
     let struct (x, y) = ip.position
     let struct (dx, dy) = ip.delta
 
@@ -33,4 +33,4 @@ let advance (ip : IPState) =
         let y = y + dy in
         if y < 0 then y + 80 else y % 80
 
-    { ip with position = struct (x', y') }
+    { delta = ip.delta; position = struct (x', y') }

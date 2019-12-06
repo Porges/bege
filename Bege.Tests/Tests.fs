@@ -7,16 +7,15 @@ open Bege.Options
 
 let private run options seed inS outS code =
     let ff = Bege.Compiler.compile options code
-    let f = ff.create (inS, outS, seed)
-    f.Run() |> ignore
-    f.GetCount()
+    let f = ff.create inS outS seed
+    f.Run()
 
 let private verify code input output =
 
     for optimize in [false; true] do
         let options =
             { optimize = optimize
-            ; standard = befunge98
+            ; standard = Standard.Befunge98
             ; verbose = false
             }
 
@@ -31,7 +30,7 @@ let private verifyMode year code input output =
     for optimize in [false; true] do
         let options =
             { optimize = optimize
-            ; standard = { befunge98 with year = year }
+            ; standard = { topology = Topology.Befunge; year = year }
             ; verbose = false
             }
 
@@ -45,7 +44,7 @@ let private verifyOptimized code input output expectedInsns =
 
     let options =
         { optimize = true
-        ; standard = befunge98
+        ; standard = Standard.Befunge98
         ; verbose = false
         }
 

@@ -6,6 +6,7 @@ open System.Reflection
 open System.Reflection.Emit
 
 open Bege.AST
+open Bege.AST.LastInstruction
 open Bege.Optimizer
 open Bege.Options
 open Bege.Runtime
@@ -77,7 +78,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
         TypeAttributes.Sealed |||
         TypeAttributes.AutoLayout
 
-    let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.BefungeBase>)
+    let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.Funge>)
 
     let definedMethods =
         chains |> Map.map (fun name chain ->
@@ -87,7 +88,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
             let method = tb.DefineMethod(name, MethodAttributes.Private, typeof<Void>, args)
             (method, chain))
 
-    let buildMethod fs (method : MethodBuilder, c) =
+    let buildMethod (method : MethodBuilder, c) =
         // printfn "Emitting method: %s" (nameFromState fs)
         let il = method.GetILGenerator()
         let l1 = il.DeclareLocal(typeof<int>)
@@ -172,25 +173,18 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
                 callBase BaseMethods.readText
 
         let emitLast = function
-            | Rand [a; b; c; d] ->
-                let (a, _) = definedMethods.[a]
-                let (b, _) = definedMethods.[b]
-                let (c, _) = definedMethods.[c]
-                let (d, _) = definedMethods.[d]
-
+            | Rand targets ->
+                let methods =
+                    targets
+                    |> Seq.map (fun t -> (il.DefineLabel(), fst definedMethods.[t]))
+                    |> Seq.toArray
+                                             
                 callBase BaseMethods.rand
 
-                let aL = il.DefineLabel()
-                let bL = il.DefineLabel()
-                let cL = il.DefineLabel()
-                let dL = il.DefineLabel()
+                il.Emit(OpCodes.Switch, methods |> Array.map (fun (lbl, _) -> lbl))
 
-                il.Emit(OpCodes.Switch, [| aL; bL; cL; dL |])
+                methods |> Array.iter (fun (lbl, target) -> il.MarkLabel lbl; tailTo target)
 
-                il.MarkLabel aL; tailTo a
-                il.MarkLabel bL; tailTo b
-                il.MarkLabel cL; tailTo c
-                il.MarkLabel dL; tailTo d
             | Branch (zero, nonZero) ->
                 let (zMethod, _) = definedMethods.[zero]
                 let (nzMethod, _) = definedMethods.[nonZero]
@@ -207,7 +201,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
         List.iter emit c.instructions
         emitLast c.lastInstruction
 
-    Map.iter buildMethod definedMethods
+    Map.iter (fun _ m -> buildMethod m) definedMethods
 
     defineRunMethod tb initialFunction definedMethods
     defineConstructor tb progText

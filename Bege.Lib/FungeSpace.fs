@@ -1,7 +1,7 @@
-﻿module Bege.FungeSpace
+﻿namespace Bege
 
 (*
- Befunge 98 space is (int32, int32)-indexed space.
+ Befunge (98) space is (int32, int32)-indexed space.
 
  We instantiate a block at a time to try to increase locality and reduce the
  number of entries, rather than one dictionary entry per memory cell.
@@ -9,7 +9,7 @@
  The blocks are 0x3F * 0x3F in size, giving just under 4000 cells per block.
  This was chosen to be on the order of the Befunge-93 space of 80x25 = 2000 cells.
 *)
-type Funge98Space() =
+type BefungeSpace () =
     let storage = System.Collections.Generic.Dictionary<int64, int32[]>()
 
     let bitMask = 0x3F

@@ -14,14 +14,14 @@ let getOutput fileName optimize =
     
     let options =
         { optimize = optimize
-        ; standard = befunge98
+        ; standard = Standard.Befunge98
         ; verbose = false
         }
 
     let factory = compile options code
 
     let output = new StringWriter ()
-    let funge = factory.create(new StringReader(""), output, uint64(System.Guid.NewGuid().GetHashCode()))
+    let funge = factory.create (new StringReader("")) output (uint64(System.Guid.NewGuid().GetHashCode()))
     funge.Run() |> ignore
     
     output.ToString()

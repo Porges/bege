@@ -1,8 +1,8 @@
-﻿using Microsoft.FSharp.Core;
-using System;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
-using static Bege.Common;
+
+using Bege.Options;
 
 namespace Bege
 {
@@ -13,7 +13,7 @@ namespace Bege
         /// <param name="std">The Funge standard to use (e.g. "befunge93", "befunge98")</param>
         /// <param name="verbose">Verbose output</param>
         static int Main(
-            [Required] FileInfo input,
+            FileInfo input,
             bool optimize = true,
             string std = "befunge98",
             bool verbose = false)
@@ -22,35 +22,31 @@ namespace Bege
             {
                 if (input != null)
                 {
-                    try
-                    {
-                        return File.ReadAllText(input.FullName);
-                    }
-                    catch (FileNotFoundException ex)
-                    {
-                        throw new FatalException($"File does not exist: '{input.FullName}'.", ExitCodes.InputNotFound, ex);
-                    }
+                    throw new FatalException($"No input file specified", ExitCodes.InvalidOptions);
                 }
-                else
+
+                try
                 {
-                    Console.Error.WriteLine("Reading program from stdin...");
-                    return Console.In.ReadToEnd();
+                    return File.ReadAllText(input.FullName);
+                }
+                catch (FileNotFoundException ex)
+                {
+                    throw new FatalException($"File does not exist: '{input.FullName}'.", ExitCodes.InputNotFound, ex);
                 }
             }
 
             try
             {
-                var standard = Options.Standard.TryParse(std);
-                if (standard == FSharpOption<Options.Standard>.None)
+                if (!Standard.TryParse(std, out var standard))
                 {
                     throw new FatalException($"Unsupported standard '{std}'.", ExitCodes.StandardNotSupported);
                 }
 
-                var factory = Compiler.compile(
-                    new Options.Options(standard.Value, optimize, verbose),
+                var factory = Compiler.Compile(
+                    new Options.Options(standard, optimize, verbose),
                     ReadProgramText());
 
-                var funge = factory.create(Console.In, Console.Out, (ulong)Guid.NewGuid().GetHashCode());
+                var funge = factory.Create(Console.In, Console.Out, (ulong)Guid.NewGuid().GetHashCode());
 
                 funge.Run();
 
