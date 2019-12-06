@@ -18,7 +18,6 @@ type UnOp =
 
 type Instruction = 
     | Load of int
-    | Push | Pop
     | Discard | Clear
     | Dup | Flip
     | OutputNumber
@@ -86,59 +85,51 @@ let computeChains (prog : Parser.Program) (options : Options) : Program<Instruct
 
     let rec follow chain (ip : InstructionPointer.State) : Chain<InstructionPointer.State> = 
 
-        let go xs =
-            follow (List.append (List.rev xs) chain) (advance ip)
+        let go x = follow (x :: chain) (advance ip)
 
         let branchChain(delta) =
             let next = advance { ip with delta = delta }
             toVisit next
             next
 
-        let endChainWith c x = (List.rev (c :: chain), x)
         let endChain x = (List.rev chain, x)
 
         let newChain delta = 
             let next = advance { ip with delta = delta }
             toVisit next
             endChain (toState next)
-
-        let binOp o =
-            go [ Pop; Pop; BinOp o; Push]
-
-        let unOp o =
-            go [ Pop; UnOp o; Push ]
-
+            
         match char (read ip.position) with
         | '>' -> newChain Dir.right
         | '<' -> newChain Dir.left
         | '^' -> newChain Dir.up
         | 'v' -> newChain Dir.down
-        | d when d >= '0' && d <= '9' -> go [Load (int(d) - int('0')); Push]
-        | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go [Load (int(h) - int('a') + 10); Push]
-        | '$' -> go [Pop; Discard]
+        | d when d >= '0' && d <= '9' -> go (Load (int(d) - int('0')))
+        | h when h >= 'a' && h <= 'f' -> checkYear 98 h ; go (Load (int(h) - int('a') + 10))
+        | '$' -> go Discard
         | ' ' -> follow chain (advance ip)
         | '#' -> follow chain (advance (advance ip))
         | '"' -> readString chain (advance ip)
         | '@' -> endChain exit
-        | '~' -> go [InputChar; Push]
-        | '&' -> go [InputNumber; Push]
-        | ':' -> go [Pop; Dup; Push; Push]
-        | '\\' -> go [Pop; Pop; Flip; Push; Push]
-        | '.' -> go [Pop; OutputNumber]
-        | ',' -> go [Pop; OutputChar]
-        | '!' -> unOp Not
+        | '~' -> go InputChar
+        | '&' -> go InputNumber 
+        | ':' -> go Dup
+        | '\\' -> go Flip
+        | '.' -> go OutputNumber
+        | ',' -> go OutputChar
+        | '!' -> go (UnOp Not)
         | '?' -> endChain (rand [branchChain Dir.left; branchChain Dir.right; branchChain Dir.up; branchChain Dir.down])
-        | '+' -> binOp Add
-        | '-' -> binOp Subtract
-        | '/' -> binOp Divide
-        | '%' -> binOp Modulo
-        | '*' -> binOp Multiply
-        | '_' -> endChainWith Pop (branch (branchChain Dir.right) (branchChain Dir.left))
-        | '|' -> endChainWith Pop (branch (branchChain Dir.down) (branchChain Dir.up))
-        | '`' -> binOp Greater
-        | 'g' -> binOp ReadText
+        | '+' -> go (BinOp Add)
+        | '-' -> go (BinOp Subtract)
+        | '/' -> go (BinOp Divide)
+        | '%' -> go (BinOp Modulo)
+        | '*' -> go (BinOp Multiply)
+        | '_' -> endChain (branch (branchChain Dir.right) (branchChain Dir.left))
+        | '|' -> endChain (branch (branchChain Dir.down) (branchChain Dir.up))
+        | '`' -> go (BinOp Greater)
+        | 'g' -> go (BinOp ReadText)
         | ';' -> checkYear 98 ';'; readComment chain (advance ip)
-        | 'n' -> checkYear 98 'n'; go [Clear]
+        | 'n' -> checkYear 98 'n'; go Clear
         | c -> 
             if options.standard.year = 93
             then raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
@@ -152,9 +143,9 @@ let computeChains (prog : Parser.Program) (options : Options) : Program<Instruct
         | '"' -> follow acc (advance state)
         | ' ' when options.standard.year = 98 ->
             match acc with
-            | Push :: Load 32 :: _ -> readString acc (advance state)
-            | _ -> readString (Push :: Load 32 :: acc) (advance state)
-        | c -> readString (Push :: Load (int c) :: acc) (advance state)
+            | Load 32 :: _ -> readString acc (advance state)
+            | _ -> readString (Load 32 :: acc) (advance state)
+        | c -> readString (Load (int c) :: acc) (advance state)
 
     and readComment chain (state : InstructionPointer.State) =
         match char (read state.position) with

@@ -126,6 +126,12 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
             il.Emit(OpCodes.Ldloc_0)
             il.Emit(OpCodes.Ldloc_1)
 
+        let pop() = 
+            callBase BaseMethods.pop
+
+        let push() =
+            callBase BaseMethods.push
+
         let emit = function
             | Load value ->
                 match value with
@@ -140,37 +146,64 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
                 | 7 -> il.Emit(OpCodes.Ldc_I4_7)
                 | 8 -> il.Emit(OpCodes.Ldc_I4_8)
                 | v -> il.Emit(OpCodes.Ldc_I4, v)
-            | Push -> callBase BaseMethods.push
-            | Pop -> callBase BaseMethods.pop
-            | Discard -> il.Emit(OpCodes.Pop)
-            | Clear -> callBase BaseMethods.clear
-            | Flip -> emitFlip()
-            | Dup -> il.Emit(OpCodes.Dup)
-            | InputChar -> callBase BaseMethods.inputChar
-            | InputNumber -> callBase BaseMethods.inputNumber
-            | OutputChar -> callBase BaseMethods.outputChar
-            | OutputNumber -> callBase BaseMethods.outputNumber
-            | BinOp Greater ->
-                // we use "less than" rather than flipping and
-                // calling greater than
-                il.Emit(OpCodes.Clt)
-            | BinOp Add -> il.Emit(OpCodes.Add)
-            | BinOp Multiply -> il.Emit(OpCodes.Mul)
-            | UnOp Not ->
-                il.Emit(OpCodes.Ldc_I4_0)
-                il.Emit(OpCodes.Ceq)
-            | BinOp Divide ->
+                push()
+            | Discard ->
+                pop()
+                il.Emit(OpCodes.Pop)
+            | Clear ->
+                callBase BaseMethods.clear
+            | Flip ->
+                pop(); pop()
                 emitFlip()
-                il.Emit(OpCodes.Div)
-            | BinOp Modulo ->
-                emitFlip()
-                il.Emit(OpCodes.Rem)
-            | BinOp Subtract ->
-                emitFlip()
-                il.Emit(OpCodes.Sub)
-            | BinOp ReadText ->
-                emitFlip()
-                callBase BaseMethods.readText
+                push(); push()
+            | Dup ->
+                pop()
+                il.Emit(OpCodes.Dup)
+                push(); push()
+            | InputChar ->
+                callBase BaseMethods.inputChar
+                push()
+            | InputNumber ->
+                callBase BaseMethods.inputNumber
+                push()
+            | OutputChar ->
+                pop()
+                callBase BaseMethods.outputChar
+            | OutputNumber ->
+                pop()
+                callBase BaseMethods.outputNumber
+            | BinOp op ->
+                pop(); pop()
+                match op with
+                | Greater ->
+                    // we use "less than" rather than flipping and
+                    // calling greater than
+                    il.Emit(OpCodes.Clt)
+                | Add ->
+                    il.Emit(OpCodes.Add) // order doesn't matter
+                | Multiply ->
+                    il.Emit(OpCodes.Mul) // order doesn't matter
+                | Divide ->
+                    emitFlip()
+                    il.Emit(OpCodes.Div)
+                | Modulo ->
+                    emitFlip()
+                    il.Emit(OpCodes.Rem)
+                | Subtract ->
+                    emitFlip()
+                    il.Emit(OpCodes.Sub)
+                | ReadText ->
+                    emitFlip()
+                    callBase BaseMethods.readText
+                push()
+
+            | UnOp op ->
+                pop()
+                match op with
+                | Not ->
+                    il.Emit(OpCodes.Ldc_I4_0)
+                    il.Emit(OpCodes.Ceq)
+                push()
 
         let emitLast = function
             | Rand targets ->
@@ -189,6 +222,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
                 let (zMethod, _) = definedMethods.[zero]
                 let (nzMethod, _) = definedMethods.[nonZero]
                 let zeroTarget = il.DefineLabel()
+                pop()
                 il.Emit(OpCodes.Brfalse, zeroTarget)
                 tailTo nzMethod
                 il.MarkLabel(zeroTarget)

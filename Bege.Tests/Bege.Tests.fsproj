@@ -16,6 +16,10 @@
       <Link>mycology.b98</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="Mycology\mycorand.bf">
+      <Link>mycorand.bf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="Befunge-93\eg\beer.bf">
       <Link>beer.bf</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

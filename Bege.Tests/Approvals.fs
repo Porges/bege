@@ -1,6 +1,8 @@
 ﻿module Approvals
 
+open System
 open System.IO
+open System.Threading
 
 open ApprovalTests
 open ApprovalTests.Reporters
@@ -28,11 +30,27 @@ let getOutput fileName optimize =
 
 [<Fact>]
 let ``Mycology sanity test`` () =
-    Approvals.Verify(getOutput "sanity.bf" true)
-
+    Approvals.Verify (getOutput "sanity.bf" true)
+    
+[<Fact>]
+let ``Mycology sanity test unoptimized`` () =
+    Approvals.Verify (getOutput "sanity.bf" false)
+    
 [<Fact>]
 let ``Mycology big test`` () = 
-    Approvals.Verify(getOutput "mycology.b98" true)
+    Approvals.Verify (getOutput "mycology.b98" true)
+    
+[<Fact>]
+let ``Mycology big test unoptimized`` () = 
+    Approvals.Verify (getOutput "mycology.b98" false)
+    
+[<Fact(Skip="Needs 'p' to work")>]
+let ``Mycology mycorand test`` () =
+    Approvals.Verify (getOutput "mycorand.bf" true)
+        
+[<Fact(Skip="Needs 'p' to work")>]
+let ``Mycology mycorand test unoptimized`` () =
+    Approvals.Verify (getOutput "mycorand.bf" false)
 
 [<Fact>]
 let ``Catseye tests`` () =

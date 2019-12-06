@@ -126,6 +126,11 @@ let ``modulo works as expected`` () =
 let ``clear clears whole stack`` () =
     verify "321n...@"  "" "0 0 0 "
 
+[<Fact>]
+let ``greater is correct`` () =
+    verify "01`.@" "" "0 "
+    verify "10`.@" "" "1 "
+
 [<Theory>]
 [<InlineData("samples-factorial.bf", "1", "1 ")>]
 [<InlineData("samples-factorial.bf", "2", "2 ")>]
