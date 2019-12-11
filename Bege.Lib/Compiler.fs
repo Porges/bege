@@ -1,7 +1,7 @@
 ﻿module Bege.Compiler
 
-open Bege.AST
 open Bege.InstructionPointer
+open Bege.Parser
 open Bege.Renderer
 open Bege.Runtime
 open Bege.Optimizer
@@ -19,14 +19,16 @@ let private updateInstructions f c =
 
 let private mapKV kf vf m = Map.fold (fun m k v -> Map.add (kf k) (vf v) m) Map.empty m
 
-let private optimizeAndMapToCommonType options programText p : Map<string, TypedChain<string>> * string =
+// The optimization and non-optimization paths produce different types:
+// this merges them together by forming the state names into strings for both.
+let private optimizeAndMapToCommonType options (program: Program<_>) : Map<string, TypedChain<string>> * string =
     if options.optimize
     then
-        let program = optimize options programText p |> mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack)
-        let entryPoint = nameFromIPAndStack (programEntryState, EmptyStack)
+        let program = optimize options program |> mapKV nameFromIPAndStack (updateInstructions nameFromIPAndStack)
+        let entryPoint = nameFromIPAndStack (programEntryState, emptyStack)
         (program, entryPoint)
     else
-        let program = p |> mapKV nameFromIP (fun v -> { chain = { instructions = v.instructions; control = Control.map nameFromIP v.control }; behaviour = (0,0) })
+        let program = program.chains |> mapKV nameFromIP (fun v -> { chain = { instructions = v.instructions; control = Control.map nameFromIP v.control }; behaviour = (0,0) })
         let entryPoint = nameFromIP programEntryState
         (program, entryPoint)
 
@@ -41,8 +43,9 @@ type FungeFactory internal (it: Type) =
 
 [<CompiledName("Compile")>]
 let compile (options : Options) (text : string) : FungeFactory =
-    let prog = Parser.parse text
-    computeChains prog options
-    |> optimizeAndMapToCommonType options prog
+    let memory = Loader.load text
+    memory
+    |> parse options
+    |> optimizeAndMapToCommonType options
     |> buildType options text
     |> FungeFactory

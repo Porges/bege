@@ -43,6 +43,6 @@ type Standard =
 type Options =
     { standard : Standard
     ; optimize : bool
-    ; verbose : bool
+    ; verbose : System.IO.TextWriter
     }
         

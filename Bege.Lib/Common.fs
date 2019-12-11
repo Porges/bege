@@ -6,19 +6,21 @@ module Common =
     let inline flip f x y = f y x
 
     // applies f to x until x doesn't change any more
-    let rec fix f x = 
-        let x' = f x
-        if x' = x then x'
-        else fix f x'
+    let fix f x =
+        let rec go x =
+            match f x with
+            | x' when x' = x -> x
+            | x' -> go x'
+
+        go x
 
     let fixN f x = 
+        let rec go i x =
+            match f i x with
+            | x' when x' = x -> x
+            | x' -> go (i+1) x'
 
-        let rec go f i x =
-            let x' = f i x
-            if x' = x then x'
-            else go f (i+1) x'
-
-        go f 0 x
+        go 0 x
 
     let inline invertMap it = 
         let f m k v =

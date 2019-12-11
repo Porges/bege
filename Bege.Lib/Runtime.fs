@@ -9,7 +9,7 @@ open System.Text
 [<AbstractClass>]
 type Funge(tr : TextReader, tw : TextWriter, progText : string, seed : uint64) =
 
-    let memory = Parser.parse progText
+    let memory = Loader.load progText
     let stack = Stack<int>()
 
     let mutable lcg = LCG.createKnuth seed

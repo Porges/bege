@@ -5,7 +5,7 @@ open System.IO
 open System.Reflection
 open System.Reflection.Emit
 
-open Bege.AST
+open Bege.Parser
 open Bege.Optimizer
 open Bege.Options
 open Bege.Runtime
@@ -82,7 +82,7 @@ let buildType (options : Options) (progText : string) (chains : Map<string, Type
     let definedMethods =
         chains |> Map.map (fun name chain ->
             let args = fst chain.behaviour
-            if options.verbose then printfn "Defining %s (%d args)" name args
+            fprintfn options.verbose "Defining %s (%d args)" name args
             let args = Array.replicate 0 (* TODO: args *) typeof<int>
             let method = tb.DefineMethod(name, MethodAttributes.Private, typeof<Void>, args)
             (method, chain))

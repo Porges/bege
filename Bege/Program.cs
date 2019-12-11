@@ -43,7 +43,7 @@ namespace Bege
                 }
 
                 var factory = Compiler.Compile(
-                    new Options.Options(standard, optimize, verbose),
+                    new Options.Options(standard, optimize, verbose ? Console.Error : new StringWriter()), // TODO: NullWriter instead of StringWriter
                     ReadProgramText());
 
                 var funge = factory.Create(Console.In, Console.Out, (ulong)Guid.NewGuid().GetHashCode());
