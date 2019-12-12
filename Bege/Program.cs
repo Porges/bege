@@ -42,11 +42,15 @@ namespace Bege
                     throw new FatalException($"Unsupported standard '{std}'.", ExitCodes.StandardNotSupported);
                 }
 
-                var factory = Compiler.Compile(
-                    new Options.Options(standard, optimize, verbose ? Console.Error : new StringWriter()), // TODO: NullWriter instead of StringWriter
-                    ReadProgramText());
-
-                var funge = factory.Create(Console.In, Console.Out, (ulong)Guid.NewGuid().GetHashCode());
+                var funge = new Runtime.Funge(
+                    new Options.Options(
+                        standard,
+                        optimize,
+                        verbose ? Console.Error : new StringWriter()), // TODO: NullWriter instead of StringWriter
+                    Console.In,
+                    Console.Out,
+                    ReadProgramText(),
+                    (ulong)Guid.NewGuid().GetHashCode());
 
                 funge.Run();
 

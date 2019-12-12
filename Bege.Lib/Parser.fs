@@ -30,7 +30,7 @@ type Instruction =
 module Control =
 
     [<RequireQualifiedAccess>]
-    type Control<'a when 'a : comparison> =
+    type Control<'a> =
         private
         | Exit
         | ToState of next : 'a
@@ -46,17 +46,17 @@ module Control =
     let Exit = Control.Exit
     let ToState = Control.ToState
     let Branch z nz = Control.Branch (z, nz)
-    let Rand<'a when 'a : comparison> (ts : IEnumerable<'a>) = 
+    let Rand (ts : IEnumerable<'a>) = 
         Control.Rand (ts|> Seq.distinct |> Seq.sort |> List.ofSeq)
 
     // Control is a functor
-    let map f = function
+    let map (f: 'a -> 'b) = function
         | Exit -> Exit
         | ToState t -> ToState (f t)
         | Branch (z, nz) -> Branch (f z) (f nz)
         | Rand ts -> Rand (ts.Select(f))
 
-    let iter f = function
+    let iter (f: 'a -> unit) = function
         | Exit -> ()
         | ToState t -> f t
         | Branch (z, nz) -> f z; f nz
@@ -64,13 +64,24 @@ module Control =
 
 open Control
 
-type Chain<'a when 'a : comparison> = { instructions: Instruction list; control: Control<'a> }
-type Program<'a when 'a : comparison> = { memory: BefungeSpace; chains: Map<'a, Chain<'a>> }
+type Chain<'a when 'a : comparison> =
+    { start: 'a
+    ; instructions: Instruction list
+    ; control: Control<'a>
+    }
+
+type Program<'a when 'a : comparison> =
+    { memory: BefungeSpace
+    ; chains: Map<'a, Chain<'a>>
+    }
+
+type Chain = Chain<InstructionPointer.State>
+type Program = Program<InstructionPointer.State>
 
 let parseChain
     (options: Options)
     (memory: BefungeSpace)
-    (start: InstructionPointer.State): Chain<InstructionPointer.State> =
+    (start: InstructionPointer.State): Chain =
 
     let checkYear y command = 
         if y > options.standard.year
@@ -81,7 +92,7 @@ let parseChain
 
     let read (struct (x, y)) = memory.[x, y]
 
-    let rec follow instructions (ip : InstructionPointer.State) : Chain<InstructionPointer.State> = 
+    let rec follow instructions (ip : InstructionPointer.State) : Chain = 
 
         let go x = follow (x :: instructions) (advance ip)
 
@@ -89,7 +100,7 @@ let parseChain
             let next = advance { ip with delta = delta }
             next
 
-        let endChain c = { instructions = List.rev instructions; control = c }
+        let endChain c = { start = start; instructions = List.rev instructions; control = c }
 
         let newChain delta = 
             let next = advance { ip with delta = delta }
@@ -126,13 +137,12 @@ let parseChain
         | 'g' -> go (BinOp ReadText)
         | ';' -> checkYear 98 ';'; readComment instructions (advance ip)
         | 'n' -> checkYear 98 'n'; go Clear
-        | c -> 
-            if options.standard.year = 93
-            then raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
-            else 
-                if c <> 'r'
-                then eprintf "Warning: unsupported instruction '%c', treating as if 'r'." c
-                newChain (reflect ip.delta)
+        | 'r' -> checkYear 98 'r'; newChain (reflect ip.delta)
+        | c when options.standard.year >= 98  ->
+            fprintf options.verbose "Warning: unsupported instruction '%c', treating as if 'r'." c
+            newChain (reflect ip.delta)
+        | c ->
+            raise <| FatalException("Instruction not supported: " + string(c), ExitCodes.CommandNotSupported)
              
     and readString acc (state : InstructionPointer.State) : Chain<InstructionPointer.State> =
         match char (read state.position) with
@@ -146,12 +156,12 @@ let parseChain
     and readComment chain (state : InstructionPointer.State) =
         match char (read state.position) with
         | ';' -> follow chain (advance state)
-        | c -> readComment chain (advance state)
+        | _ -> readComment chain (advance state)
 
     follow [] start
 
 
-let parse (options : Options) (memory : BefungeSpace) : Program<InstructionPointer.State> =
+let parse (options : Options) (memory : BefungeSpace) : Program =
     
     let toCompile = System.Collections.Generic.Queue<InstructionPointer.State>()
     let visited = System.Collections.Generic.HashSet<InstructionPointer.State>()

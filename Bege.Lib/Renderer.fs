@@ -8,240 +8,222 @@ open System.Reflection.Emit
 open Bege.Parser
 open Bege.Optimizer
 open Bege.Options
-open Bege.Runtime
 
-let assemblyName = AssemblyName "BefungeAssembly"
-let moduleName = "BefungeModule"
-let programClassName = "BefungeProgram"
+type private ExplicitStack =
+    | Push
+    | Pop
+    | I of Instruction
+    | C of Control<int>
 
-let defineRunMethod (tb : TypeBuilder) (initialFunction : string) (definedMethods : Map<string, MethodBuilder * TypedChain<string>>) : unit =
-    let runMethod = tb.DefineMethod("Run", MethodAttributes.Public ||| MethodAttributes.Virtual, typeof<int>, Type.EmptyTypes)
-    let (entryMethod, _) = definedMethods.[initialFunction]
-    let runIL = runMethod.GetILGenerator()
-    runIL.Emit(OpCodes.Ldarg_0)
-    runIL.Emit(OpCodes.Call, entryMethod)
-    runIL.Emit(OpCodes.Ldarg_0)
-    runIL.Emit(OpCodes.Call, BaseMethods.count)
-    runIL.Emit(OpCodes.Ret)
+let private makeExplicit (chain: Chain<int>): ExplicitStack list = 
 
-let defineConstructor (tb : TypeBuilder) (progText : string) : unit =
-    let ctor =
-        tb.DefineMethod(
-            ".ctor",
-            MethodAttributes.Public ||| MethodAttributes.SpecialName,
-            typeof<Void>,
-            [| typeof<TextReader>; typeof<TextWriter>; typeof<uint64> |])
+    let explicitInstruction = function
+        | Clear -> Seq.singleton (I Clear)
+        | instruction ->
+            let (pop, push) = stackBehaviour instruction
+            Seq.concat [ Seq.replicate pop Pop; Seq.singleton (I instruction); Seq.replicate push Push ]
 
-    let il = ctor.GetILGenerator()
-    il.Emit(OpCodes.Ldarg_0)
-    il.Emit(OpCodes.Ldarg_1)
-    il.Emit(OpCodes.Ldarg_2)
-    il.Emit(OpCodes.Ldstr, progText)
-    il.Emit(OpCodes.Ldarg_3)
-    il.Emit(OpCodes.Call, BaseMethods.ctor)
-    il.Emit(OpCodes.Ret)
+    let explicitControl = function
+        | Branch _ as b -> seq { Pop; C b }
+        // no other control pops
+        | c -> seq { C c }
 
-    let emptyCtor =
-        tb.DefineMethod(".ctor", MethodAttributes.Public ||| MethodAttributes.SpecialName)
+    chain.instructions
+    |> Seq.map explicitInstruction
+    |> Seq.concat
+    |> Bege.Common.flip Seq.append (explicitControl chain.control)
+    |> List.ofSeq
 
-    let emptyIL = emptyCtor.GetILGenerator()
-    emptyIL.Emit(OpCodes.Ldarg_0)
-    emptyIL.Emit(OpCodes.Ldstr, progText)
-    emptyIL.Emit(OpCodes.Call, BaseMethods.easyCtor)
-    emptyIL.Emit(OpCodes.Ret)
+let private optimizeExplicit (options: Options) (instructions: ExplicitStack list) =
+    if not options.optimize
+    then instructions
+    else
+        let rec go = function
+            | Push :: (I x) :: Pop :: is
+                when stackBehaviour x = (0, 1) -> I x :: I Flip :: go is
+            | Push :: Pop :: is -> go is
+            | i :: is -> i :: go is
+            | [] -> []
 
-let defineMain (dynMod : ModuleBuilder) (programType : Type) : MethodInfo =
-    let entryPoint = dynMod.DefineType("EntryPoint", TypeAttributes.Sealed ||| TypeAttributes.BeforeFieldInit, typeof<obj>)
-    let methodAttributes =
-        MethodAttributes.Static |||
-        MethodAttributes.Public |||
-        MethodAttributes.HideBySig
+        fprintfn options.verbose "Explicit form:\n\t%A" instructions
 
-    let main = entryPoint.DefineMethod("Main", methodAttributes, typeof<int>, [| typeof<string[]> |])
-    let il = main.GetILGenerator()
-    il.Emit(OpCodes.Newobj, programType.GetConstructor(Type.EmptyTypes))
-    il.Emit(OpCodes.Call, programType.GetMethod("Run"))
-    il.Emit(OpCodes.Ret)
+        let after = Bege.Common.fix go instructions
+        if instructions <> after then fprintfn options.verbose "Optimized explicit to:\n\t%A" after
+        after
 
-    entryPoint.CreateType() |> ignore
-    entryPoint.GetMethod("Main")
+type FungeFace =
+    abstract Pop : unit -> int 
+    abstract Push : int -> unit
+    abstract Clear : unit -> unit
+    abstract OutputChar : int -> unit
+    abstract OutputNumber : int -> unit
+    abstract InputChar : unit -> int
+    abstract InputNumber : unit -> int
+    abstract ReadText : int * int -> int
+    abstract Rand : unit -> int
+    abstract Call : int -> unit
 
-let buildType (options : Options) (progText : string) (chains : Map<string, TypedChain<string>>, initialFunction : string) : Type =
+module private Methods =
+   let private m n = typeof<FungeFace>.GetMethod(n, BindingFlags.Instance ||| BindingFlags.Public)
+   let push = m "Push"
+   let pop = m "Pop"
+   let clear = m "Clear"
+   let outputChar = m "OutputChar"
+   let inputChar = m "InputChar"
+   let inputNumber = m "InputNumber"
+   let outputNumber = m "OutputNumber"
+   let readText = m "ReadText"
+   let rand = m "Rand"
+   let call = m "Call"
 
-    let dynAsm = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndCollect)
+let private emitChain (options: Options) (il: ILGenerator) (chain: Chain<int>): unit =
+    fprintfn options.verbose "--- Emitting method: %d" chain.start
 
-    let dynMod = dynAsm.DefineDynamicModule moduleName
-    let typeAttributes =
-        TypeAttributes.Public |||
-        TypeAttributes.Class |||
-        TypeAttributes.Sealed |||
-        TypeAttributes.AutoLayout
+    // might need up to 2 locals
+    il.DeclareLocal(typeof<int>) |> ignore
+    il.DeclareLocal(typeof<int>) |> ignore
 
-    let tb = dynMod.DefineType(programClassName, typeAttributes, typeof<Runtime.Funge>)
-
-    let definedMethods =
-        chains |> Map.map (fun name chain ->
-            let args = fst chain.behaviour
-            fprintfn options.verbose "Defining %s (%d args)" name args
-            let args = Array.replicate 0 (* TODO: args *) typeof<int>
-            let method = tb.DefineMethod(name, MethodAttributes.Private, typeof<Void>, args)
-            (method, chain))
-
-    let buildMethod (method : MethodBuilder, tc: TypedChain<_>) =
-        // printfn "Emitting method: %s" (nameFromState fs)
-        let il = method.GetILGenerator()
-        let l1 = il.DeclareLocal(typeof<int>)
-        let l2 = il.DeclareLocal(typeof<int>)
-
-        let callBase (mi : MethodInfo) =
-            let args = mi.GetParameters().Length
-            if args = 0 then
-                il.Emit(OpCodes.Ldarg_0)
-                il.Emit(OpCodes.Call, mi)
-            elif args = 1 then
-                il.Emit(OpCodes.Stloc_0)
-                il.Emit(OpCodes.Ldarg_0)
-                il.Emit(OpCodes.Ldloc_0)
-                il.Emit(OpCodes.Call, mi)
-            elif args = 2 then
-                il.Emit(OpCodes.Stloc_1)
-                il.Emit(OpCodes.Stloc_0)
-                il.Emit(OpCodes.Ldarg_0)
-                il.Emit(OpCodes.Ldloc_0)
-                il.Emit(OpCodes.Ldloc_1)
-                il.Emit(OpCodes.Call, mi)
-            else
-                raise <| new NotSupportedException()
-
-        let tailTo (mi : MethodInfo) =
+    let callHelper (mi : MethodInfo) =
+        let args = mi.GetParameters().Length
+        if args = 0 then
             il.Emit(OpCodes.Ldarg_0)
-            il.Emit(OpCodes.Tailcall)
-            il.Emit(OpCodes.Call, mi)
-            il.Emit(OpCodes.Ret)
-
-        let emitFlip() =
+            il.Emit(OpCodes.Callvirt, mi)
+        elif args = 1 then
             il.Emit(OpCodes.Stloc_0)
+            il.Emit(OpCodes.Ldarg_0)
+            il.Emit(OpCodes.Ldloc_0)
+            il.Emit(OpCodes.Callvirt, mi)
+        elif args = 2 then
             il.Emit(OpCodes.Stloc_1)
+            il.Emit(OpCodes.Stloc_0)
+            il.Emit(OpCodes.Ldarg_0)
             il.Emit(OpCodes.Ldloc_0)
             il.Emit(OpCodes.Ldloc_1)
+            il.Emit(OpCodes.Callvirt, mi)
+        else
+            raise <| new NotSupportedException()
 
-        let pop() = 
-            callBase BaseMethods.pop
+    let emitLoadInt = function
+        | -1 -> il.Emit(OpCodes.Ldc_I4_M1)
+        | 0 -> il.Emit(OpCodes.Ldc_I4_0)
+        | 1 -> il.Emit(OpCodes.Ldc_I4_1)
+        | 2 -> il.Emit(OpCodes.Ldc_I4_2)
+        | 3 -> il.Emit(OpCodes.Ldc_I4_3)
+        | 4 -> il.Emit(OpCodes.Ldc_I4_4)
+        | 5 -> il.Emit(OpCodes.Ldc_I4_5)
+        | 6 -> il.Emit(OpCodes.Ldc_I4_6)
+        | 7 -> il.Emit(OpCodes.Ldc_I4_7)
+        | 8 -> il.Emit(OpCodes.Ldc_I4_8)
+        | v -> il.Emit(OpCodes.Ldc_I4, v)
 
-        let push() =
-            callBase BaseMethods.push
+    let tailTo (next: int) =
+        il.Emit(OpCodes.Ldarg_0)
+        emitLoadInt next
+        il.Emit(OpCodes.Tailcall)
+        il.Emit(OpCodes.Callvirt, Methods.call)
+        il.Emit(OpCodes.Ret)
 
-        let emit = function
-            | Load value ->
-                match value with
-                | -1 -> il.Emit(OpCodes.Ldc_I4_M1)
-                | 0 -> il.Emit(OpCodes.Ldc_I4_0)
-                | 1 -> il.Emit(OpCodes.Ldc_I4_1)
-                | 2 -> il.Emit(OpCodes.Ldc_I4_2)
-                | 3 -> il.Emit(OpCodes.Ldc_I4_3)
-                | 4 -> il.Emit(OpCodes.Ldc_I4_4)
-                | 5 -> il.Emit(OpCodes.Ldc_I4_5)
-                | 6 -> il.Emit(OpCodes.Ldc_I4_6)
-                | 7 -> il.Emit(OpCodes.Ldc_I4_7)
-                | 8 -> il.Emit(OpCodes.Ldc_I4_8)
-                | v -> il.Emit(OpCodes.Ldc_I4, v)
-                push()
-            | Discard ->
-                pop()
-                il.Emit(OpCodes.Pop)
-            | Clear ->
-                callBase BaseMethods.clear
-            | Flip ->
-                pop(); pop()
+    let emitFlip () =
+        il.Emit(OpCodes.Stloc_0)
+        il.Emit(OpCodes.Stloc_1)
+        il.Emit(OpCodes.Ldloc_0)
+        il.Emit(OpCodes.Ldloc_1)
+
+    let emitInstruction = function
+        | Load value ->
+            emitLoadInt value
+        | Discard ->
+            il.Emit(OpCodes.Pop)
+        | Clear ->
+            callHelper Methods.clear
+        | Flip ->
+            emitFlip()
+        | Dup ->
+            il.Emit(OpCodes.Dup)
+        | InputChar ->
+            callHelper Methods.inputChar
+        | InputNumber ->
+            callHelper Methods.inputNumber
+        | OutputChar ->
+            callHelper Methods.outputChar
+        | OutputNumber ->
+            callHelper Methods.outputNumber
+        | BinOp op ->
+            match op with
+            | Greater ->
+                // we use "less than" rather than flipping and
+                // calling greater than
+                il.Emit(OpCodes.Clt)
+            | Add ->
+                il.Emit(OpCodes.Add) // order doesn't matter
+            | Multiply ->
+                il.Emit(OpCodes.Mul) // order doesn't matter
+            | Divide ->
                 emitFlip()
-                push(); push()
-            | Dup ->
-                pop()
-                il.Emit(OpCodes.Dup)
-                push(); push()
-            | InputChar ->
-                callBase BaseMethods.inputChar
-                push()
-            | InputNumber ->
-                callBase BaseMethods.inputNumber
-                push()
-            | OutputChar ->
-                pop()
-                callBase BaseMethods.outputChar
-            | OutputNumber ->
-                pop()
-                callBase BaseMethods.outputNumber
-            | BinOp op ->
-                pop(); pop()
-                match op with
-                | Greater ->
-                    // we use "less than" rather than flipping and
-                    // calling greater than
-                    il.Emit(OpCodes.Clt)
-                | Add ->
-                    il.Emit(OpCodes.Add) // order doesn't matter
-                | Multiply ->
-                    il.Emit(OpCodes.Mul) // order doesn't matter
-                | Divide ->
-                    emitFlip()
-                    il.Emit(OpCodes.Div)
-                | Modulo ->
-                    emitFlip()
-                    il.Emit(OpCodes.Rem)
-                | Subtract ->
-                    emitFlip()
-                    il.Emit(OpCodes.Sub)
-                | ReadText ->
-                    emitFlip()
-                    callBase BaseMethods.readText
-                push()
+                il.Emit(OpCodes.Div)
+            | Modulo ->
+                emitFlip()
+                il.Emit(OpCodes.Rem)
+            | Subtract ->
+                emitFlip()
+                il.Emit(OpCodes.Sub)
+            | ReadText ->
+                emitFlip()
+                callHelper Methods.readText
 
-            | UnOp op ->
-                pop()
-                match op with
-                | Not ->
-                    il.Emit(OpCodes.Ldc_I4_0)
-                    il.Emit(OpCodes.Ceq)
-                push()
+        | UnOp op ->
+            match op with
+            | Not ->
+                il.Emit(OpCodes.Ldc_I4_0)
+                il.Emit(OpCodes.Ceq)
 
-        let emitControl = function
-            | Rand targets ->
-                let methods =
-                    targets
-                    |> Seq.map (fun t -> (il.DefineLabel(), fst definedMethods.[t]))
-                    |> Seq.toArray
-                                             
-                callBase BaseMethods.rand
+    let emitControl = function
+        | Rand targets ->
+            let methods =
+                targets
+                |> Seq.map (fun t -> (il.DefineLabel(), t))
+                |> Seq.toArray
+                                         
+            callHelper Methods.rand
 
-                il.Emit(OpCodes.Switch, methods |> Array.map (fun (lbl, _) -> lbl))
+            il.Emit(OpCodes.Switch, methods |> Array.map (fun (lbl, _) -> lbl))
 
-                methods |> Array.iter (fun (lbl, target) -> il.MarkLabel lbl; tailTo target)
+            methods |> Array.iter (fun (lbl, target) -> il.MarkLabel lbl; tailTo target)
 
-            | Branch (zero, nonZero) ->
-                let (zMethod, _) = definedMethods.[zero]
-                let (nzMethod, _) = definedMethods.[nonZero]
-                let zeroTarget = il.DefineLabel()
-                pop()
-                il.Emit(OpCodes.Brfalse, zeroTarget)
-                tailTo nzMethod
-                il.MarkLabel(zeroTarget)
-                tailTo zMethod
+        | Branch (zero, nonZero) ->
+            let zeroTarget = il.DefineLabel()
+            
+            il.Emit(OpCodes.Brfalse, zeroTarget)
+            tailTo nonZero
+            il.MarkLabel(zeroTarget)
+            tailTo zero
 
-            | Exit -> il.Emit(OpCodes.Ret)
+        | Exit ->
+            il.Emit(OpCodes.Ret)
 
-            | ToState n ->
-                let (nMethod, _) = definedMethods.[n]
-                tailTo nMethod
+        | ToState next ->
+            tailTo next
 
-        List.iter emit tc.chain.instructions
-        emitControl tc.chain.control
+    let emit = function
+        | Push -> callHelper Methods.push
+        | Pop -> callHelper Methods.pop
+        | I insn -> emitInstruction insn
+        | C control -> emitControl control
 
-    Map.iter (fun _ m -> buildMethod m) definedMethods
+    chain
+    |> makeExplicit
+    |> optimizeExplicit options
+    |> Seq.iter emit
 
-    defineRunMethod tb initialFunction definedMethods
-    defineConstructor tb progText
 
-    let result = tb.CreateType()
+let private fungeFaceArg = [| typeof<FungeFace> |]
 
-    result
+let defineMethod (options: Options) (chain: Chain<int>): Action<FungeFace> =
+    
+    let method = DynamicMethod (string(chain.start), typeof<Void>, fungeFaceArg)
+
+    let il = method.GetILGenerator()
+    emitChain options il chain
+
+    method.CreateDelegate(typeof<Action<FungeFace>>) :?> Action<FungeFace>
 

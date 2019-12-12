@@ -10,17 +10,21 @@ let private lines s =
             line
     }
     
-// TODO: Enforce 80x25 restriction on Befunge93?
+// TODO [93]: Enforce 80x25 restriction on Befunge93?
+// TODO [Trefunge]: Form-feed should move to next plane
 
-let load input : BefungeSpace =
+let loadInto (memory: BefungeSpace) (input: string): unit =
 
-    let result = BefungeSpace ()
-    
     lines input
     |> Seq.iteri
         (fun x line -> 
             for y in 0..line.Length-1 do
-                result.[x,y] <- int line.[y])
+                let char = line.[y]
+                if char <> ' ' // spaces are 'transparent' per Befunge spec, and do not overwrite anything in memory
+                then memory.[x,y] <- int char)
  
+let load (input: string): BefungeSpace =
+
+    let result = BefungeSpace ()
+    loadInto result input
     result
- 

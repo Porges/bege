@@ -16,38 +16,73 @@ type StackValue =
     /// A dead (unused) value, we will kill any discard it encounters.
     | KillDiscard
 
-type Stack
-    = Forever of StackValue
-    | Push of StackValue * Stack
+module Stack =
+    type Stack
+        = Forever of StackValue
+        | Push of StackValue * Stack
 
-let emptyStack = Forever (Known 0)
-let unknownStack = Forever (Unknown)
-    
-let push stk value =
-    match (stk, value) with
-    | (Forever x, y) when x = y -> Forever x
-    | (stk, value) -> Push (value, stk)
+    let emptyStack = Forever (Known 0)
+    let unknownStack = Forever (Unknown)
+        
+    let push stk value =
+        match (stk, value) with
+        //| (Forever x, y) when x = y -> Forever x
+        | (stk, value) -> Push (value, stk)
 
-let pop = function
-    | Forever x -> (x, Forever x)
-    | Push (KillDiscard, _) -> failwith "Unexpected KillDiscard"
-    | Push (value, rest) -> (value, rest)
-    
-let popAllowDiscard = function
-    | Forever x -> (x, Forever x)
-    | Push (value, rest) -> (value, rest)
-    
-let dup stk = 
-    let (value, stk) = pop stk
-    push (push stk value) value
+    let pop = function
+        | Forever x -> (x, Forever x)
+        | Push (KillDiscard, _) -> failwith "Unexpected KillDiscard"
+        | Push (value, rest) -> (value, rest)
+        
+    let popAllowDiscard = function
+        | Forever x -> (x, Forever x)
+        | Push (value, rest) -> (value, rest)
+        
+    let dup stk = 
+        let (value, stk) = pop stk
+        push (push stk value) value
+
+    let rec simplify = function 
+        | Forever _ as stk -> stk
+        | Push (x, stk) ->
+            match simplify stk with
+            | Forever y as stk when x = y -> stk
+            | stk -> Push (x, stk)
+
+module TrackedStack =
+    type TrackedStack = { read: int; stack: Stack.Stack }
+
+    let emptyStack = { read = 0; stack = Stack.emptyStack }
+    let unknownStack = { read = 0; stack = Stack.unknownStack }
+
+    let push stk value = { stk with stack = Stack.push stk.stack value }
+    let pop stk = 
+        let (x, newStack) = Stack.pop stk.stack
+        match stk.stack with
+        | Stack.Forever _ ->
+            (x, { read = stk.read + 1; stack = newStack })
+        | _ -> 
+            (x, { stk with stack = newStack })
+
+    let popAllowDiscard stk = 
+        let (x, newStack) = Stack.popAllowDiscard stk.stack
+        match stk.stack with
+        | Stack.Forever _ -> 
+            (x, { read = stk.read + 1; stack = newStack })
+        | _ ->
+            (x, { stk with stack = newStack })
+
+    let dup stk =
+        let (value, stk) = pop stk
+        push (push stk value) value
 
 /// How many items the chain pops, and how many it stores.
 type StackBehaviour = int * int
-type StateId = InstructionPointer.State * Stack
+type StateId = InstructionPointer.State * Stack.Stack
 
-type TypedChain<'a when 'a : comparison> = { chain: Chain<'a>; behaviour: StackBehaviour }
+type TypedChain = { chain: Chain<StateId>; behaviour: StackBehaviour }
 
-type TypedProgram = Map<StateId, TypedChain<StateId>>
+type TypedProgram = Map<StateId, TypedChain>
 
 let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
 
@@ -69,8 +104,8 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
     let canBeInlined fs =
         counts.[fs] = 1
 
-    let isJump fs =
-        match program.[fs] with
+    let isJump start =
+        match program.[start] with
         | { chain = { instructions = []; control = ToState _ } } -> true
         | _ -> false
 
@@ -85,10 +120,11 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
             match c.chain.control with
             | ToState n
                 when canBeInlined n || isJump n ->
-                // if options.verbose then printfn "Inlining %A into %A" n fs
+                fprintf options.verbose "Inlining %A into %A" n c.chain.start
                 let targetChain = program.[n]
                 { chain =
-                    { instructions = (List.append c.chain.instructions targetChain.chain.instructions)
+                    { start = c.chain.start
+                    ; instructions = (List.append c.chain.instructions targetChain.chain.instructions)
                     ; control = targetChain.chain.control }
                 ; behaviour = c.behaviour // TODO: this is wrong!
                 }
@@ -108,7 +144,7 @@ let inlineChains (options : Options) (program : TypedProgram) : TypedProgram =
     let trimmedResult =
         result
         (* can't remove entry state *)
-        |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = emptyStack))
+        |> Map.filter (fun ((ip, s) as k) _ -> newCounts.ContainsKey k || (ip = programEntryState && s = Stack.emptyStack))
 
     fprintfn options.verbose "Inlining reduced chains from %d to %d." program.Count trimmedResult.Count
 
@@ -151,11 +187,11 @@ let stackBehaviour: Instruction -> StackBehaviour = function
     | OutputChar -> (1, 0)
     | OutputNumber -> (1, 0)
         
-    | Clear _ -> failwith "Needs its own case"
+    | Clear _ -> failwith "Clear needs its own case"
 
 /// Figures out the eventual fate for a value that
 /// was just pushed onto the stack:
-let eventualFate (c: Chain<'a>): EventualFate =
+let eventualFate (c: Chain<_>): EventualFate =
     /// `st` = number of items on stack above the value.
     let rec eventualFateLocal st = function
         | [] ->
@@ -175,76 +211,69 @@ let eventualFate (c: Chain<'a>): EventualFate =
 
     eventualFateLocal 0 c.instructions
 
+open TrackedStack
+
 let performStackAnalysis
-    (memory : BefungeSpace)
-    ((_, initStack) : StateId)
-    ({instructions=instructions; control=control} : Chain<StateId>)
-    : TypedChain<StateId> =
+    (memory: BefungeSpace)
+    (initStack: Stack.Stack)
+    ({instructions=instructions; control=control; start=start} : Chain)
+    : TypedChain =
 
     // acc = instruction acculuator
     // stk = stack
     // read = how many items read from stack
-    let rec go acc read (stk : Stack) = function
+    let rec go acc (stk : TrackedStack) = function
         | [] ->
             let rec finale wrote = function
-                | Push (KillDiscard, rest) ->
+                | Stack.Push (KillDiscard, rest) ->
                     match control with
-                    | Exit -> finale wrote rest // really this needs to check that all rest are killed
+                    | Exit -> finale wrote rest // TODO: really this needs to check that all values on stack are killed
                     | _ -> failwith "KillDiscard left on stack"
 
-                | Push (_, rest) -> finale (wrote+1) rest
+                | Stack.Push (_, rest) -> finale (wrote+1) rest
 
-                | x when x = emptyStack ->
-                    let (instructions, control) =
+                | x when x = Stack.emptyStack ->
+                    let control =
                         if wrote = 0
                         // we know it's empty so we can propagate that information
                         // to the next chain.
-                        then (List.rev acc, Control.map (fun (ip, _) -> (ip, emptyStack)) control)
-                        else (List.rev acc, Control.map (fun (ip, _) -> (ip, unknownStack)) control)
+                        then Control.map (fun ip -> (ip, Stack.emptyStack)) control
+                        else Control.map (fun ip -> (ip, Stack.unknownStack)) control
 
-                    //if read <> 0
-                    //then failwith "Logic problem - claiming read values for known empty stack"
-
-                    { chain = { instructions = instructions; control = control }
-                    ; behaviour = (read, wrote)
+                    { chain = { start = (start, initStack); instructions = List.rev acc; control = control }
+                    ; behaviour = (stk.read, wrote)
                     }
 
-                | x when x = unknownStack ->
+                | x when x = Stack.unknownStack ->
+
+                    let control = Control.map (fun ip -> (ip, Stack.unknownStack)) control
     
-                    //match last with
-                    //| Branch _ ->
-                    //    if List.length stk <> 1
-                    //    then failwith "Branch without push before it"
-                    //| _ ->
-                    //    if not (List.isEmpty stk)
-                    //    then failwith "Function ended with non-empty local stack"
-
-                    { chain = { instructions = List.rev acc; control = control }
-                    ; behaviour = (read, wrote)
+                    { chain = { start = (start, initStack); instructions = List.rev acc; control = control }
+                    ; behaviour = (stk.read, wrote)
                     }
 
-                | Forever _ -> failwith "Invalid stack created" // Forever should only be Known 0 or Unknown
+                | Stack.Forever _ -> failwith "Invalid stack created" // Forever should only be Known 0 or Unknown
 
-            finale 0 stk
+            finale 0 stk.stack
         | Load k :: is ->
-            match eventualFate {instructions = is; control = control} with
-            | Discarded -> go acc read (push stk KillDiscard) is
-            | _ -> go (Load k :: acc) read (push stk (Known k)) is
+            match eventualFate { start = start; instructions = is; control = control} with
+            | Discarded -> go acc (push stk KillDiscard) is
+            | _ -> go (Load k :: acc) (push stk (Known k)) is
 
         | Discard :: is ->
             let (value, stk) = popAllowDiscard stk
             match value with
-            | KillDiscard -> go acc read stk is
-            | _ -> go (Discard :: acc) read stk is
+            | KillDiscard -> go acc stk is
+            | _ -> go (Discard :: acc) stk is
         
         | (OutputChar as i) :: is
         | (OutputNumber as i) :: is ->
             let (value, stk) = pop stk
             match value with
-            | Known v -> go (i :: Load v :: Discard :: acc) read stk is
-            | _ -> go (i :: acc) read stk is
+            | Known v -> go (i :: Load v :: Discard :: acc) stk is
+            | _ -> go (i :: acc) stk is
 
-        | Clear :: is -> go (Clear :: acc) read emptyStack is
+        | Clear :: is -> go (Clear :: acc) emptyStack is
 
         | BinOp op as bop :: is ->
         
@@ -262,24 +291,24 @@ let performStackAnalysis
                     | Modulo -> a % b
                     | ReadText -> memory.[b, a]
                     | Greater -> if a > b then 1 else 0
-                go (Load result :: Discard :: Discard :: acc) read (push stk (Known result)) is
+                go (Load result :: Discard :: Discard :: acc) (push stk (Known result)) is
 
             | (_, Known 0)
             | (Known 0, _)
                 when op = Multiply ->
-                    go (Load 0 :: Discard :: Discard :: acc) read (push stk (Known 0)) is
+                    go (Load 0 :: Discard :: Discard :: acc) (push stk (Known 0)) is
 
             | (Known x, Known 1)
             | (Known 1, Known x)
                 when op = Multiply ->
-                    go (Load x :: Discard :: Discard :: acc) read (push stk (Known x)) is
+                    go (Load x :: Discard :: Discard :: acc) (push stk (Known x)) is
 
             | (Known 0, Known x)
             | (Known x, Known 0)
                 when op = Add ->
-                    go (Load x :: Discard :: Discard :: acc) read (push stk (Known x)) is
+                    go (Load x :: Discard :: Discard :: acc) (push stk (Known x)) is
 
-            | _ -> go (bop :: acc) read (push stk Unknown) is
+            | _ -> go (bop :: acc) (push stk Unknown) is
 
         | UnOp op as uop :: is ->
             let (value, stk) = pop stk
@@ -289,61 +318,69 @@ let performStackAnalysis
                     match op with 
                     | Not -> if x = 0 then 1 else 0
 
-                go (Load result :: Discard :: acc) read (push stk (Known result)) is
-            | _ -> go (uop :: acc) read (push stk Unknown) is
+                go (Load result :: Discard :: acc) (push stk (Known result)) is
+            | _ -> go (uop :: acc) (push stk Unknown) is
             
-        | Dup :: is -> go (Dup :: acc) read (dup stk) is
+        | Dup :: is -> go (Dup :: acc) (dup stk) is
         | Flip :: is ->
             let (a, stk) = pop stk
             let (b, stk) = pop stk
             match (a, b) with
-            | (Known a', Known b') -> go (Load b' :: Load a' :: Discard :: Discard :: acc) read (push (push stk a) b) is
-            | _ -> go (Flip :: acc) read (push (push stk a) b) is
+            | (Known a', Known b') -> go (Load b' :: Load a' :: Discard :: Discard :: acc) (push (push stk a) b) is
+            | _ -> go (Flip :: acc) (push (push stk a) b) is
 
         | (InputChar as i) :: is
-        | (InputNumber as i) :: is -> go (i :: acc) read (push stk Unknown) is
+        | (InputNumber as i) :: is -> go (i :: acc) (push stk Unknown) is
 
-    go [] 0 initStack instructions
+    go [] { read = 0; stack = initStack } instructions
 
-let optimizeControl fs (c: Chain<'a>) =
-    match c.control with
+let optimizeControl (tc: TypedChain): TypedChain =
+
+    match tc.chain.control with
 
     // identical branches - change to unconditional jump
     // we must add Discard to have the same stack behaviour
     | Branch (l, r) when l = r ->
-        { instructions = List.append c.instructions [Discard]
-        ; control = ToState r }
+        { tc with 
+            chain = 
+            { tc.chain with
+                  instructions = List.append tc.chain.instructions [Discard]
+                  ; control = ToState r }
+        }
 
     // Rand with only a single distinct target must jump to it:
-    | Rand [t] -> { c with control = ToState t }
+    | Rand [t] ->
+        { tc with 
+            chain = { tc.chain with control = ToState t }
+        }
 
     // Rand that loops back to same function must eventually branch to another,
     // so if there are no instructions in this function we could just jump instead:
     | Rand [t1; t2] as r
-        when List.isEmpty c.instructions 
+        when List.isEmpty tc.chain.instructions 
         -> 
-            if fs = t1 
-            then { c with control = ToState t2 }
-            elif fs = t2
-            then { c with control = ToState t1 }
-            else c
+            if tc.chain.start = t1 
+            then { tc with chain = { tc.chain with control = ToState t2 } }
+            elif tc.chain.start = t2
+            then { tc with chain = { tc.chain with control = ToState t1 } }
+            else tc 
 
-    | _ -> c
+    | _ -> tc
 
-let optimizeChain (options: Options) program stateId (tc : TypedChain<StateId>): TypedChain<StateId> =
+let optimizeChain (options: Options) (memory: BefungeSpace) (tc : TypedChain): TypedChain =
 
     let before = tc
 
     let after =
-        tc.chain
-        |> optimizeControl stateId
-        |> performStackAnalysis program stateId
+        tc
+        |> optimizeControl
         |> fun tc -> { tc with chain = fix peepholeOptimize tc.chain }
 
     if before <> after
     then fprintfn options.verbose "Chain optimized from:\n    %A\nto:\n    %A" before.chain after.chain
 
     after
+
     
 /// performStackAnalysis can add references to "specializations"
 /// that don't exist yet. This function creates them.
@@ -351,7 +388,7 @@ let instantiateSpecializations (program: TypedProgram): TypedProgram =
     // copy the existing one with "default" stack if it doesn't already exist
     let copyIfNotExists ((ip, _) as state) m =
         if not (Map.containsKey state m)
-        then Map.add state m.[(ip, unknownStack)] m
+        then Map.add state m.[(ip, Stack.unknownStack)] m
         else m
 
     Map.fold (fun m _ c ->
@@ -364,10 +401,10 @@ let instantiateSpecializations (program: TypedProgram): TypedProgram =
 
 let optimizeChains options memory (program : TypedProgram) : TypedProgram =
     program
-    |> Map.map (optimizeChain options memory)
+    |> Map.map (fun _ v -> optimizeChain options memory v)
     |> instantiateSpecializations
 
-let collapseIdenticalChains (m : Map<_, TypedChain<_>>): Map<_, TypedChain<_>> =
+let collapseIdenticalChains (m : Map<_, TypedChain>): Map<_, TypedChain> =
 
     let lookup =
         m
@@ -393,34 +430,36 @@ let collapseIdenticalChains (m : Map<_, TypedChain<_>>): Map<_, TypedChain<_>> =
 
     result
 
-let toTypedChain c =
-    { instructions = c.instructions; control = Control.map (fun i -> (i, unknownStack)) c.control }
-
 // add initial types (stack behaviours) to the program
-let toTypedProgram (options: Options) (program: Program<_>): TypedProgram =
-    program.chains
-    |> Map.fold (fun m ipState v ->
-        let stack =
-            if ipState = programEntryState
-            then emptyStack
-            else unknownStack
+//let toTypedProgram (options: Options) (program: Program<_>): TypedProgram =
+//    program.chains
+//    |> Map.fold (fun m ipState v ->
+//        let stack =
+//            if ipState = programEntryState
+//            then emptyStack
+//            else unknownStack
 
-        let typedChain = performStackAnalysis program.memory (ipState, stack) (toTypedChain v)
+//        let typedChain = performStackAnalysis program.memory (toTypedChain v)
         
-        fprintfn options.verbose "%A has stack behaviour %A" (ipState, stack) typedChain.behaviour
+//        fprintfn options.verbose "%A has stack behaviour %A" (ipState, stack) typedChain.behaviour
 
-        Map.add (ipState, stack) typedChain m)
-        Map.empty
+//        Map.add (ipState, stack) typedChain m)
+//        Map.empty
 
-let optimize (options : Options) (program: Program<_>): TypedProgram =
+//let optimize (options : Options) (program: Program<_>): TypedProgram =
 
-    // optimize until we run out of optimizations
-    program
-    |> toTypedProgram options
-    |> instantiateSpecializations
-    |> fixN (fun n x ->
-        fprintfn options.verbose "--- Performing optimization pass %d ---" n
-        x
-        |> inlineChains options 
-        |> optimizeChains options program.memory
-        |> collapseIdenticalChains)
+//    // optimize until we run out of optimizations
+//    program
+//    |> toTypedProgram options
+//    |> instantiateSpecializations
+//    |> fixN (fun n x ->
+//        fprintfn options.verbose "--- Performing optimization pass %d ---" n
+//        x
+//        |> inlineChains options 
+//        |> optimizeChains options program.memory
+//        |> collapseIdenticalChains)
+
+let optimize (options: Options) (memory: BefungeSpace) (initStack: Stack.Stack) (chain: Chain): TypedChain =
+    performStackAnalysis memory initStack chain
+    |> optimizeChain options memory
+

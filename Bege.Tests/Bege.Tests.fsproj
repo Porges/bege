@@ -2,8 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp31</TargetFramework>
+    <Tailcalls>true</Tailcalls>
   </PropertyGroup>
-  
+
   <ItemGroup>
     <Compile Include="Support\TestOutput.fs" />
     <Compile Include="Optimizer.fs" />

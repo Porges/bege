@@ -10,13 +10,13 @@ type Simple (itoh: Xunit.Abstractions.ITestOutputHelper) =
     let verbose = base.Verbose
 
     let run options seed inS outS code =
-        let ff = Bege.Compiler.compile options code
-        let f = ff.create inS outS seed
+        let f = Bege.Runtime.Funge(options, inS, outS, code, seed)
         f.Run()
+        f.GetCount()
 
     let verify code input output =
 
-        for optimize in [false; true] do
+        for optimize in [true; false] do
             let options =
                 { optimize = optimize
                 ; standard = Standard.Befunge98
@@ -68,11 +68,12 @@ type Simple (itoh: Xunit.Abstractions.ITestOutputHelper) =
     [<InlineData("665+*1-,@", "", "A", 1)>]
     [<InlineData("665+*1-.@", "", "65 ", 1)>]
     [<InlineData(">123...@", "", "3 2 1 ", 3)>]
-    [<InlineData(">123#...@", "", "3 2 ", 3)>]
+    [<InlineData(">123#...@", "", "3 2 ", 2)>]
     [<InlineData("123.$.@", "", "3 1 ", 2)>]
     [<InlineData("123\\...@", "", "2 3 1 ", 3)>]
     [<InlineData("65`.@", "", "1 ", 1)>]
     [<InlineData("25`.@", "", "0 ", 1)>]
+    [<InlineData("&&/.@","4 2", "2 ", 3)>]
     let specExample code input output insns =
         verify code input output
         verifyOptimized code input output insns
@@ -110,8 +111,10 @@ type Simple (itoh: Xunit.Abstractions.ITestOutputHelper) =
         verify "<@,~" "A" "A"
 
     [<Fact>]
-    let ``optimized branch still pops`` ()  =
-        verifyOptimized "12v\n@._.@" "" "1 " 3
+    let ``optimized branch`` ()  =
+        // check that branch performs no Pop on global stack
+        // also, must ensure branch targets are different or they will be merged into one
+        verifyOptimized "12v\n@._..@" "" "1 " 3
 
     [<Fact>]
     let ``98 string mode collapses multiple spaces`` () =

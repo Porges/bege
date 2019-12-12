@@ -8,7 +8,6 @@ open ApprovalTests
 open ApprovalTests.Reporters
 open Xunit
 
-open Bege.Compiler
 open Bege.Options
 
 type Approval (itoh: Xunit.Abstractions.ITestOutputHelper) =
@@ -24,11 +23,16 @@ type Approval (itoh: Xunit.Abstractions.ITestOutputHelper) =
             ; verbose = verbose
             }
 
-        let factory = compile options code
-
         let output = new StringWriter ()
-        let funge = factory.create (new StringReader("")) output (uint64(System.Guid.NewGuid().GetHashCode()))
-        funge.Run() |> ignore
+        let funge =
+            Bege.Runtime.Funge(
+                options,
+                new StringReader(""),
+                output,
+                code,
+                uint64(System.Guid.NewGuid().GetHashCode()))
+
+        funge.Run()
         
         output.ToString()
 
